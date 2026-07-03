@@ -1,0 +1,9 @@
+{
+  "name": "youtube-subtitle-ai-translate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "유튜브 AI 번역 크롬 익스텐션 — 개발용 타입 정의 (확장 동작과 무관)",
+  "devDependencies": {
+    "@types/chrome": "^0.0.283"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "checkJs": false,
+    "types": ["chrome"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["*.js", "content/*.js", "bg/*.js", "server/*.js"],
+  "exclude": ["node_modules"]
+}

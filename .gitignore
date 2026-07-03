@@ -1,0 +1,16 @@
+# 의존성 (개발용 타입 정의 — npm install로 재설치)
+node_modules/
+
+# OS / 에디터 잡파일
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# 로그
+*.log
+
+# 로컬 실험/산출물
+tmp/
+dist/
