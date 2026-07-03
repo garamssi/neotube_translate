@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<!--
+  popup.html — 액션 팝업 (설계서 §5 결정: 보조 수단)
+  범위: 전체 on/off 토글 + 현재 번역 경로 요약만. 상세 설정은 패널 인라인.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --bg: #ffffff; --text: #0f0f0f; --text2: #606060;
+      --chip: #f2f2f2; --chip-hover: #e5e5e5; --border: rgba(0,0,0,0.14);
+      --accent: #065fd4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #212121; --text: #f1f1f1; --text2: #aaaaaa;
+        --chip: #303030; --chip-hover: #3f3f3f; --border: rgba(255,255,255,0.16);
+        --accent: #3ea6ff;
+      }
+    }
+    body {
+      margin: 0; width: 260px; background: var(--bg); color: var(--text);
+      font-family: Roboto, 'Noto Sans KR', sans-serif; font-size: 13px;
+    }
+    .head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      font-weight: 700; font-size: 14px;
+    }
+    .head svg { display: block; stroke: var(--accent); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px;
+    }
+    .toggle {
+      width: 40px; height: 22px; border-radius: 11px; border: none; padding: 2px;
+      background: var(--chip-hover); cursor: pointer; display: flex; justify-content: flex-start;
+    }
+    .toggle.on { background: var(--accent); justify-content: flex-end; }
+    .knob { width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+    .route {
+      padding: 0 14px 12px 14px; color: var(--text2); font-size: 12px; line-height: 1.5;
+    }
+    .route b { color: var(--text); font-weight: 600; }
+    .hint { padding: 10px 14px; border-top: 1px solid var(--border); color: var(--text2); font-size: 11.5px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <svg width="18" height="18" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M7 13h6"></path><path d="M16.5 13H17"></path><path d="M7 16h2.5"></path><path d="M12.5 16H17"></path></svg>
+    AI 번역 스크립트
+  </div>
+  <div class="row">
+    <div>전체 사용</div>
+    <button class="toggle" id="enabled"><div class="knob"></div></button>
+  </div>
+  <div class="route" id="route">경로 확인 중…</div>
+  <div class="hint">상세 설정은 유튜브 시청 페이지의 패널 헤더 기어(⚙) 아이콘에서 변경할 수 있습니다.</div>
+  <script src="constants.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
