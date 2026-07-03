@@ -1,0 +1,342 @@
+/**
+ * panel.css — 스크립트 패널 스타일 (목업 시각 사양 이식)
+ *
+ * 목업의 CSS 토큰·수치를 그대로 사용한다. 유튜브 페이지 스타일과의 충돌을
+ * 피하기 위해 모든 규칙을 .ytx-panel 하위로 한정하고, 토큰은 패널 루트에
+ * data-ytx-theme 속성으로 스코프한다. (html[dark] 관찰 → content.js가 설정)
+ */
+
+.ytx-panel[data-ytx-theme="dark"] {
+  --ytx-bg: #0f0f0f; --ytx-surface: #0f0f0f; --ytx-chip: #272727; --ytx-chip-hover: #3f3f3f;
+  --ytx-text: #f1f1f1; --ytx-text2: #aaaaaa; --ytx-border: rgba(255, 255, 255, 0.16);
+  --ytx-accent: #3ea6ff; --ytx-accent-ink: #0f0f0f; --ytx-danger: #ff6b60;
+  --ytx-skeleton: #272727; --ytx-skeleton-hi: #3a3a3a;
+}
+
+.ytx-panel[data-ytx-theme="light"] {
+  --ytx-bg: #ffffff; --ytx-surface: #ffffff; --ytx-chip: #f2f2f2; --ytx-chip-hover: #e5e5e5;
+  --ytx-text: #0f0f0f; --ytx-text2: #606060; --ytx-border: rgba(0, 0, 0, 0.14);
+  --ytx-accent: #065fd4; --ytx-accent-ink: #ffffff; --ytx-danger: #cc2b1d;
+  --ytx-skeleton: #eeeeee; --ytx-skeleton-hi: #dddddd;
+}
+
+@keyframes ytx-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes ytx-spin { to { transform: rotate(360deg); } }
+
+/* ── 패널 컨테이너 (목업: border 1px, radius 12px) ─────────── */
+.ytx-panel {
+  border: 1px solid var(--ytx-border);
+  border-radius: 12px;
+  background: var(--ytx-surface);
+  color: var(--ytx-text);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: Roboto, 'Noto Sans KR', sans-serif;
+  margin-bottom: 16px; /* 아래 추천 목록과 간격 (목업 gap: 16px) */
+  box-sizing: border-box;
+}
+.ytx-panel *, .ytx-panel *::before, .ytx-panel *::after { box-sizing: border-box; }
+
+/* M7: 극장/전체화면 모드에서 패널 숨김 (설계서 §5, 1차 범위) */
+.ytx-panel.ytx-hidden { display: none; }
+
+.ytx-panel ::-webkit-scrollbar { width: 8px; }
+.ytx-panel ::-webkit-scrollbar-thumb { background: var(--ytx-chip-hover); border-radius: 4px; }
+.ytx-panel ::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 헤더 ──────────────────────────────────────────────────── */
+.ytx-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ytx-border);
+}
+.ytx-panel.ytx-collapsed .ytx-header { border-bottom: none; }
+
+.ytx-header-icon { flex-shrink: 0; display: block; fill: none; stroke: var(--ytx-accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ytx-title { font-size: 15px; font-weight: 700; }
+.ytx-lang-chip {
+  font-size: 12px; font-weight: 500; color: var(--ytx-text2);
+  border: 1px solid var(--ytx-border); border-radius: 10px; padding: 2px 8px;
+}
+.ytx-header-spacer { flex: 1; }
+
+.ytx-icon-btn {
+  background: none; border: none; color: var(--ytx-text2);
+  cursor: pointer; padding: 4px 6px; border-radius: 6px; font-size: 15px;
+  display: flex; align-items: center;
+}
+.ytx-icon-btn svg { display: block; fill: currentColor; }
+.ytx-icon-btn.ytx-on { background: var(--ytx-chip); color: var(--ytx-text); }
+
+.ytx-chevron { transition: transform 0.2s; transform: rotate(180deg); }
+.ytx-panel.ytx-collapsed .ytx-chevron { transform: none; }
+
+/* ── 툴바 ──────────────────────────────────────────────────── */
+.ytx-toolbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ytx-border);
+  flex-wrap: wrap;
+}
+
+/* 세그먼트 컨트롤 (목록/문단) */
+.ytx-seg-group { display: flex; border: 1px solid var(--ytx-border); border-radius: 8px; overflow: hidden; }
+.ytx-seg-btn {
+  background: transparent; color: var(--ytx-text2); border: none;
+  padding: 5px 12px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit;
+}
+.ytx-seg-btn.ytx-on { background: var(--ytx-chip-hover); color: var(--ytx-text); font-weight: 600; }
+
+/* 토글 칩 (원문 병기 / 자동 스크롤 / 오버레이) */
+.ytx-chip-btn {
+  background: var(--ytx-chip); color: var(--ytx-text2); border: 1px solid var(--ytx-border);
+  border-radius: 14px; padding: 4px 11px; font-size: 13px; font-weight: 500;
+  cursor: pointer; font-family: inherit;
+}
+.ytx-chip-btn.ytx-on {
+  background: color-mix(in srgb, var(--ytx-accent) 16%, transparent);
+  color: var(--ytx-accent);
+  border-color: color-mix(in srgb, var(--ytx-accent) 40%, transparent);
+  font-weight: 600;
+}
+.ytx-chip-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── 본문 ──────────────────────────────────────────────────── */
+.ytx-body {
+  position: relative;
+  /* 목업의 430px에서 상향: 뷰포트에 맞춰 확장 (최소 500px 보장, 큰 화면에서 최대 760px) */
+  height: clamp(500px, 62vh, 760px);
+  overflow-y: auto;
+}
+.ytx-panel.ytx-collapsed .ytx-toolbar,
+.ytx-panel.ytx-collapsed .ytx-body,
+.ytx-panel.ytx-collapsed .ytx-footer { display: none; }
+
+/* 빈 상태 / 대기 상태 (M2 셸 · 자막없음 상태 공용) */
+.ytx-empty {
+  height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 24px; text-align: center;
+}
+.ytx-empty-title { font-size: 15px; font-weight: 700; }
+.ytx-empty-desc { font-size: 13.5px; color: var(--ytx-text2); line-height: 1.5; }
+
+/* ── 목록 모드 행 (목업 row 스타일) ─────────────────────────── */
+.ytx-rows { padding: 6px; }
+.ytx-row {
+  display: grid; grid-template-columns: 44px 1fr; gap: 10px;
+  padding: 8px; border-radius: 8px; cursor: pointer;
+}
+.ytx-row:hover { background: var(--ytx-chip); }
+.ytx-row.ytx-active { background: color-mix(in srgb, var(--ytx-accent) 14%, transparent); }
+.ytx-row-time {
+  font-size: 13px; color: var(--ytx-text2);
+  font-variant-numeric: tabular-nums; padding-top: 1px;
+}
+.ytx-row.ytx-active .ytx-row-time { color: var(--ytx-accent); font-weight: 700; }
+.ytx-row-main { min-width: 0; }
+.ytx-row-text { font-size: 14.5px; line-height: 1.5; }
+.ytx-row-text.ytx-pending { color: var(--ytx-text2); font-size: 13px; line-height: 1.45; }
+.ytx-row-src { font-size: 13px; line-height: 1.45; color: var(--ytx-text2); margin-top: 2px; }
+
+.ytx-row-sk { margin-top: 6px; }
+
+/* ── 문단 모드 (목업 para 사양) ─────────────────────────────── */
+.ytx-para { padding: 14px 16px; }
+.ytx-para p { margin: 0; font-size: 15px; line-height: 1.9; text-wrap: pretty; }
+.ytx-span {
+  cursor: pointer; border-radius: 4px; padding: 1px 2px;
+  color: var(--ytx-text2);
+}
+.ytx-span:hover { background: var(--ytx-chip); }
+.ytx-span.ytx-active {
+  background: color-mix(in srgb, var(--ytx-accent) 18%, transparent);
+  color: var(--ytx-text); font-weight: 500;
+}
+.ytx-span-pending { opacity: 0.55; font-style: italic; }
+
+/* ── 자동 스크롤 재활성 버튼 (수동 스크롤 시 노출) ──────────── */
+.ytx-resume-btn {
+  position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%);
+  background: var(--ytx-accent); color: var(--ytx-accent-ink); border: none;
+  border-radius: 14px; padding: 5px 14px; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit; z-index: 2;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.ytx-panel { position: relative; }
+
+/* ── 취득 중 스켈레톤 행 ────────────────────────────────────── */
+.ytx-fetching { padding: 6px; display: flex; flex-direction: column; gap: 4px; overflow: hidden; height: 100%; }
+.ytx-sk-row { display: grid; grid-template-columns: 44px 1fr; gap: 10px; padding: 8px; }
+
+/* ── 번역 진행 헤더 (목업 '번역 중' 상태) ───────────────────── */
+.ytx-progress { padding: 12px 14px; border-bottom: 1px solid var(--ytx-border); position: sticky; top: 0; background: var(--ytx-surface); z-index: 1; }
+.ytx-progress-row { display: flex; align-items: center; gap: 8px; }
+.ytx-progress-label { font-size: 14px; }
+.ytx-progress-route { flex: 1; text-align: right; font-size: 13px; color: var(--ytx-text2); }
+.ytx-progress-track { height: 3px; border-radius: 2px; background: var(--ytx-chip); margin-top: 10px; overflow: hidden; }
+.ytx-progress-fill { height: 100%; background: var(--ytx-accent); transition: width 0.3s; }
+
+.ytx-spinner {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 2px solid var(--ytx-chip-hover); border-top-color: var(--ytx-accent);
+  border-radius: 50%; animation: ytx-spin 0.9s linear infinite;
+}
+
+/* ── 스켈레톤 (취득 중 상태) ────────────────────────────────── */
+.ytx-skeleton {
+  height: 12px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--ytx-skeleton) 25%, var(--ytx-skeleton-hi) 50%, var(--ytx-skeleton) 75%);
+  background-size: 200% 100%;
+  animation: ytx-shimmer 1.4s linear infinite;
+}
+
+/* ── 오류 상태 (목업 오류 화면) ─────────────────────────────── */
+.ytx-error-badge {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: color-mix(in srgb, var(--ytx-danger) 14%, transparent);
+  color: var(--ytx-danger);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 19px; font-weight: 700;
+}
+.ytx-error-actions { display: flex; gap: 8px; margin-top: 12px; }
+.ytx-mono { font-family: 'Roboto Mono', monospace; }
+
+.ytx-primary-btn {
+  background: var(--ytx-accent); color: var(--ytx-accent-ink); border: none;
+  border-radius: 18px; padding: 8px 18px; font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.ytx-ghost-btn {
+  background: none; color: var(--ytx-accent); border: none;
+  border-radius: 18px; padding: 8px 14px; font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+
+/* ── 인라인 설정 (M6, 목업 설정 화면 사양) ─────────────────── */
+.ytx-panel.ytx-settings-open .ytx-toolbar,
+.ytx-panel.ytx-settings-open .ytx-footer,
+.ytx-panel.ytx-settings-open .ytx-resume-btn { display: none; }
+
+.ytx-settings {
+  padding: 16px 16px 12px 16px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.ytx-field { display: flex; flex-direction: column; gap: 8px; }
+.ytx-field-label { font-size: 13px; font-weight: 700; color: var(--ytx-text2); }
+.ytx-field-hint { font-size: 12.5px; color: var(--ytx-text2); line-height: 1.5; }
+.ytx-field-row { display: flex; align-items: center; justify-content: space-between; }
+.ytx-field-row-label { font-size: 14px; }
+
+.ytx-route-group {
+  display: grid; grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--ytx-border); border-radius: 10px; overflow: hidden;
+}
+.ytx-route-btn {
+  background: transparent; color: var(--ytx-text2); border: none;
+  padding: 9px 12px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit;
+}
+.ytx-route-btn.ytx-on { background: var(--ytx-chip-hover); color: var(--ytx-text); font-weight: 600; }
+
+.ytx-input {
+  background: var(--ytx-chip); border: 1px solid var(--ytx-border); border-radius: 8px;
+  padding: 9px 12px; color: var(--ytx-text); font-size: 14px; font-family: inherit; outline: none;
+}
+.ytx-select {
+  background: var(--ytx-chip); border: 1px solid var(--ytx-border); border-radius: 8px;
+  padding: 9px 12px; color: var(--ytx-text); font-size: 14px; font-family: inherit; outline: none;
+}
+.ytx-select-sm { padding: 6px 10px; font-size: 13.5px; }
+
+.ytx-toggle {
+  width: 36px; height: 20px; border-radius: 10px; border: none; padding: 2px;
+  background: var(--ytx-chip-hover); cursor: pointer;
+  display: flex; justify-content: flex-start;
+}
+.ytx-toggle.ytx-on { background: var(--ytx-accent); justify-content: flex-end; }
+.ytx-toggle-knob { width: 16px; height: 16px; border-radius: 50%; background: #ffffff; }
+
+.ytx-settings-footer { display: flex; justify-content: flex-end; margin-top: 2px; }
+
+/* ── ? 도움말 툴팁 (hover 또는 클릭 토글) ────────────────────── */
+.ytx-help-wrap { position: relative; display: inline-flex; vertical-align: middle; margin-left: 4px; }
+.ytx-help {
+  width: 17px; height: 17px; border-radius: 50%;
+  border: 1px solid var(--ytx-border); background: var(--ytx-chip);
+  color: var(--ytx-text2); font-size: 11px; font-weight: 700;
+  cursor: pointer; padding: 0; line-height: 1; font-family: inherit;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ytx-help:hover { color: var(--ytx-accent); border-color: var(--ytx-accent); }
+.ytx-help-tip {
+  display: none;
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 5;
+  min-width: 220px; max-width: 300px;
+  background: var(--ytx-chip); color: var(--ytx-text);
+  border: 1px solid var(--ytx-border); border-radius: 8px;
+  padding: 8px 10px; font-size: 12.5px; font-weight: 400; line-height: 1.5;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  white-space: normal; text-align: left;
+}
+.ytx-help-wrap:hover .ytx-help-tip,
+.ytx-help-wrap.ytx-open .ytx-help-tip { display: block; }
+
+/* ── 툴바 '번역' 버튼 (수동 모드 대기 시에만 노출) ───────────── */
+.ytx-chip-cta {
+  background: var(--ytx-accent); color: var(--ytx-accent-ink);
+  border-color: transparent; font-weight: 700;
+}
+.ytx-chip-cta:hover { opacity: 0.9; }
+
+/* ── 수동 모드 CTA ──────────────────────────────────────────── */
+.ytx-cta-btn { padding: 6px 14px; font-size: 13.5px; }
+
+/* ── 번역 캐시 목록 (설정 화면 내) ──────────────────────────── */
+.ytx-cache-list {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 180px; overflow-y: auto;
+  border: 1px solid var(--ytx-border); border-radius: 8px; padding: 4px;
+}
+.ytx-cache-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px;
+}
+.ytx-cache-item:hover { background: var(--ytx-chip); }
+.ytx-cache-info { min-width: 0; flex: 1; }
+.ytx-cache-title {
+  font-size: 13.5px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ytx-cache-meta { font-size: 12px; color: var(--ytx-text2); margin-top: 1px; }
+.ytx-cache-del { flex-shrink: 0; font-size: 13px; }
+
+/* ── 요약 뷰 ────────────────────────────────────────────────── */
+.ytx-summary { padding: 12px 16px 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+.ytx-sum-block { display: flex; flex-direction: column; gap: 8px; }
+.ytx-sum-label { font-size: 13px; font-weight: 700; color: var(--ytx-text2); }
+.ytx-sum-tldr { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ytx-sum-tldr li { font-size: 14.5px; line-height: 1.6; }
+.ytx-sum-section {
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent;
+}
+.ytx-sum-section:hover { background: var(--ytx-chip); border-color: var(--ytx-border); }
+.ytx-sum-sec-head { display: flex; align-items: baseline; gap: 8px; }
+.ytx-sum-time {
+  font-size: 12.5px; font-weight: 600; color: var(--ytx-accent);
+  font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+.ytx-sum-title { font-size: 14.5px; font-weight: 600; line-height: 1.4; }
+.ytx-sum-text { font-size: 13.5px; line-height: 1.6; color: var(--ytx-text2); margin-top: 4px; }
+
+/* ── 푸터 ──────────────────────────────────────────────────── */
+.ytx-footer {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--ytx-border);
+  font-size: 12.5px; color: var(--ytx-text2);
+}
+.ytx-status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--ytx-text2); }
+.ytx-status-dot.ytx-accent { background: var(--ytx-accent); }
+.ytx-status-dot.ytx-danger { background: var(--ytx-danger); }
