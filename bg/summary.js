@@ -258,61 +258,12 @@ async function withSummaryRetry(callOnce) {
 const GEMINI_VIDEO_TIMEOUT_MS = 180000;
 
 /**
+ * Gemini JSON 호출 — 공용 빌더(geminiGenerate, bg/translation.js)에 위임.
+ * 규격(responseMimeType+responseJsonSchema)·오류 매핑·페이싱이 한 곳에서 관리된다.
  * @param parts 문자열(텍스트 콘텐츠) 또는 Gemini parts 배열(fileData 포함 가능)
  */
 async function geminiJsonCall(settings, instruction, parts, schema, timeoutMs) {
-  await acquireGeminiSlot(settings); // 사전 페이싱 — 429 예방 (번역과 게이트 공유)
-  const model = settings.geminiModel || YTX.GEMINI.DEFAULT_MODEL;
-  const url = `${YTX.GEMINI.API_BASE}/${encodeURIComponent(model)}:generateContent`;
-  const timeout = timeoutMs || GEMINI_TIMEOUT_MS;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.geminiApiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: instruction }] },
-        contents: [{ parts: typeof parts === 'string' ? [{ text: parts }] : parts }],
-        generationConfig: {
-          temperature: 0, // 하네스: 실행 간 결과 변동 최소화
-          responseFormat: { text: { mimeType: 'application/json', schema } }
-        }
-      }),
-      signal: controller.signal
-    });
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      // 시간 초과: 조용한 재시도 루프 대신 즉시 오류 표면화 (재시도는 사용자 버튼으로)
-      throw transError('TIMEOUT', `Gemini 응답 시간 초과 (${timeout / 1000}초)`);
-    }
-    throw transError('NETWORK', `Gemini API에 연결할 수 없습니다: ${e.message}`, { retriable: true });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) {
-    const status = res.status;
-    let detail = '';
-    try { detail = (await res.json())?.error?.message || ''; } catch (e) { /* 무시 */ }
-    if (status === 429) {
-      if (/day|daily|PerDay|quota.*exceeded|exhausted/i.test(detail)) {
-        throw transError('QUOTA',
-          'Gemini 무료 사용량(일일 한도)이 소진되었습니다 — 태평양 시간 자정에 리셋됩니다. ' +
-          '설정에서 유료 티어 전환 또는 Claude CLI 경로를 사용하세요.');
-      }
-      const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
-      throw transError('RATE_LIMITED', detail || '요청 한도 초과', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });
-    }
-    if (status === 400) throw transError('BAD_REQUEST', detail || '잘못된 요청');
-    if (status === 401 || status === 403) throw transError('AUTH', detail || 'API 키 인증 실패');
-    throw transError('UPSTREAM_ERROR', detail || `Gemini 서버 오류 (${status})`, { retriable: status >= 500 });
-  }
-
-  const dataJson = await res.json();
-  const text = dataJson?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+  const text = await geminiGenerate(settings, { instruction, parts, schema, timeoutMs });
   try {
     return JSON.parse(text);
   } catch (e) {

@@ -62,10 +62,10 @@ const YTX = {
   // 처리율(TPM)을 넘으면 생성 도중 끊기므로(레이트리밋 재시도 반복의 원인)
   // Claude 경로는 80세그먼트 × 2병렬로 처리율 예산 안에 맞춘다.
   CHUNK_LOCALHOST: { SEGMENTS: 80, CHARS: 10000, FIRST: 20, PARALLEL: 2 },
-  // Gemini 경로: 모델 자체 한도는 입력 1M/출력 65K 토큰(공식 문서 확인)으로 매우 커서
-  // "요청 수 최소화"가 무료 티어(RPM/RPD) 대응의 핵심 — 청크 300세그로 대형화.
-  // (300세그 출력 ≈ 1.2만 토큰, 한도의 20% 미만. 시간 제약은 fetch 타임아웃 120s로 해결)
-  CHUNK_GEMINI: { SEGMENTS: 300, CHARS: 30000, FIRST: 20, PARALLEL: 2 },
+  // Gemini 경로: 입력 1M/출력 65K 토큰(공식 확인). 번역의 병목은 "출력"이며
+  // 세그당 ~40토큰 → 600세그 출력 ≈ 2.4만 토큰(한도의 ~37%)로 안전.
+  // 출력이 한도에 걸리면(MAX_TOKENS) 청크 자동 이분할로 방어(bg/translation.js).
+  CHUNK_GEMINI: { SEGMENTS: 600, CHARS: 60000, FIRST: 20, PARALLEL: 2 },
   RETRY_BACKOFF_MS: [1000, 4000], // 지수 백오프 2회
   // 설계서 §6의 20s에서 상향: 대형 청크 + Sonnet 지연 대응.
   // SW 30s fetch 수명 규칙은 keepalive(25s 간격 API 호출)로 워커를 유지해 대응.

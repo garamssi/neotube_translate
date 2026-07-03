@@ -43,10 +43,10 @@ function keepaliveRelease() {
   }
 }
 
-// Gemini 대형 청크(300세그) 생성 시간 확보를 위해 120초.
+// Gemini 대형 청크(600세그 ≈ 출력 2.4만 토큰) 생성 시간 확보를 위해 180초.
 // SW 수명은 작업 중 상시 가동되는 keepalive(25초 간격 API 호출)로 유지 —
-// URL 요약(180s)과 동일 방식. 종료가 관찰되면 offscreen document로 이전 (확인 필요)
-const GEMINI_TIMEOUT_MS = 120000;
+// URL 요약과 동일 방식. 종료가 관찰되면 offscreen document로 이전 (확인 필요)
+const GEMINI_TIMEOUT_MS = 180000;
 
 /* ═══════════════════════════════════════════════════════════
  * 설정 · 캐시
@@ -340,6 +340,105 @@ async function acquireGeminiSlot(settings, alive) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+ * Gemini 공용 요청 빌더 — 번역·요약이 공유하는 단일 진입점
+ *
+ * 구조화 출력 규격 (실 API 검증 기준):
+ *  - 문서의 responseFormat.text.mimeType 예제는 실제 v1beta 프로토와 불일치
+ *    (mime_type이 enum이라 "application/json" 거부 — 실사용 오류로 확인)
+ *  - 같은 공식 문서의 Go SDK 예제가 쓰는 responseMimeType + responseJsonSchema
+ *    조합이 REST에서 안정 동작 → 이를 1차 규격으로 사용
+ *  - 필드 미지원 응답 시 구형 responseSchema(OpenAPI 서브셋)로 1회 폴백
+ * ═══════════════════════════════════════════════════════════ */
+function geminiGenerationConfig(schema, useLegacySchema) {
+  const cfg = { temperature: 0, responseMimeType: 'application/json' }; // 하네스: 변동 최소화
+  if (useLegacySchema) cfg.responseSchema = schema;
+  else cfg.responseJsonSchema = schema;
+  return cfg;
+}
+
+/**
+ * @param opts { instruction, parts(문자열 또는 parts배열), schema, timeoutMs?, alive? }
+ * @returns 모델 응답 텍스트 (JSON 문자열)
+ */
+async function geminiGenerate(settings, opts) {
+  await acquireGeminiSlot(settings, opts.alive); // 사전 페이싱 — 429 예방
+  const model = settings.geminiModel || YTX.GEMINI.DEFAULT_MODEL;
+  const url = `${YTX.GEMINI.API_BASE}/${encodeURIComponent(model)}:generateContent`;
+  const timeout = opts.timeoutMs || GEMINI_TIMEOUT_MS;
+  const parts = typeof opts.parts === 'string' ? [{ text: opts.parts }] : opts.parts;
+
+  const attempt = async (useLegacySchema) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.geminiApiKey },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: opts.instruction }] },
+          contents: [{ parts }],
+          generationConfig: geminiGenerationConfig(opts.schema, useLegacySchema)
+        }),
+        signal: controller.signal
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        throw transError('TIMEOUT', `Gemini 응답 시간 초과 (${timeout / 1000}초)`);
+      }
+      throw transError('NETWORK', `Gemini API에 연결할 수 없습니다: ${e.message}`, { retriable: true });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!res.ok) {
+      const status = res.status;
+      let detail = '';
+      try { detail = (await res.json())?.error?.message || ''; } catch (e) { /* 무시 */ }
+
+      if (status === 429) {
+        // RPD(일일 무료 사용량) 소진은 재시도 불가 → 별도 코드로 화면 표면화
+        if (/day|daily|PerDay|quota.*exceeded|exhausted/i.test(detail)) {
+          throw transError('QUOTA',
+            'Gemini 무료 사용량(일일 한도)이 소진되었습니다 — 태평양 시간 자정에 리셋됩니다. ' +
+            '설정에서 유료 티어 전환 또는 Claude CLI 경로를 사용하세요.');
+        }
+        const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
+        throw transError('RATE_LIMITED', detail || '요청 한도 초과', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });
+      }
+      if (status === 400) {
+        // 스키마 필드 미지원(구버전 백엔드) → 구형 responseSchema로 1회 폴백
+        if (!useLegacySchema && /response_?json_?schema|Unknown name/i.test(detail)) {
+          throw transError('SCHEMA_FIELD', detail); // attempt 루프에서 폴백 처리
+        }
+        throw transError('BAD_REQUEST', detail || '잘못된 요청 (API 키/모델명 확인)');
+      }
+      if (status === 401 || status === 403) throw transError('AUTH', detail || 'API 키 인증 실패');
+      if (status >= 500) throw transError('UPSTREAM_ERROR', detail || `Gemini 서버 오류 (${status})`, { retriable: true });
+      throw transError('UNKNOWN', `HTTP ${status}: ${detail}`);
+    }
+
+    const data = await res.json();
+    const cand = data?.candidates?.[0];
+    // 출력 토큰 한도 도달 → JSON이 잘려 있음. 호출부가 청크를 쪼개 재시도하도록 별도 코드
+    if (cand?.finishReason === 'MAX_TOKENS') {
+      throw transError('OUTPUT_LIMIT', '출력 토큰 한도 도달 — 청크 분할 필요');
+    }
+    return cand?.content?.parts?.map((p) => p.text || '').join('') || '';
+  };
+
+  try {
+    return await attempt(false);
+  } catch (e) {
+    if (e.code === 'SCHEMA_FIELD') {
+      log('responseJsonSchema 미지원 응답 — 구형 responseSchema로 폴백');
+      return attempt(true);
+    }
+    throw e;
+  }
+}
+
 /* ── 공유 레이트리밋 쿨다운 ──────────────────────────────────
  * 429는 계정 단위 처리율 초과이므로, 한 워커가 429를 받으면
  * 모든 워커가 쿨다운이 끝날 때까지 새 호출을 시작하지 않는다.
@@ -373,6 +472,14 @@ async function translateChunkWithRetry(chunk, chunkIndex, totalChunks, caption, 
     try {
       return await callOnce();
     } catch (e) {
+      // 출력 한도 도달(대형 청크의 유일한 실패 모드) → 이분할 재귀로 자동 복구
+      if (e.code === 'OUTPUT_LIMIT' && chunk.length >= 2) {
+        const mid = Math.ceil(chunk.length / 2);
+        log(`청크 ${chunkIndex}: 출력 한도 도달 — ${chunk.length}세그를 ${mid}+${chunk.length - mid}로 분할`);
+        const left = await translateChunkWithRetry(chunk.slice(0, mid), chunkIndex, totalChunks, caption, settings, alive);
+        const right = await translateChunkWithRetry(chunk.slice(mid), chunkIndex, totalChunks, caption, settings, alive);
+        return left.concat(right);
+      }
       const err = e.code ? e : transError('UNKNOWN', String(e.message || e), { retriable: true });
 
       if (err.code === 'RATE_LIMITED' && rateLimitTries < 3) {
@@ -428,79 +535,24 @@ function buildTranslatorPrompt(sourceLang, targetLang) {
  * - 시스템 프롬프트: systemInstruction 필드
  * ═══════════════════════════════════════════════════════════ */
 async function callGemini(chunk, caption, settings) {
-  await acquireGeminiSlot(settings); // 사전 페이싱 — 429 예방
-  const model = settings.geminiModel || YTX.GEMINI.DEFAULT_MODEL;
-  const url = `${YTX.GEMINI.API_BASE}/${encodeURIComponent(model)}:generateContent`;
   const userPayload = JSON.stringify(chunk.map((s) => ({ id: s.id, text: s.text })));
 
-  const body = {
-    systemInstruction: { parts: [{ text: buildTranslatorPrompt(caption.source_lang, settings.targetLang) }] },
-    contents: [{ parts: [{ text: `Translate these subtitle segments:\n${userPayload}` }] }],
-    generationConfig: {
-      responseFormat: {
-        text: {
-          mimeType: 'application/json',
-          schema: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'integer', description: 'Segment id from the request' },
-                text: { type: 'string', description: 'Translated subtitle text' }
-              },
-              required: ['id', 'text']
-            }
-          }
-        }
+  const text = await geminiGenerate(settings, {
+    instruction: buildTranslatorPrompt(caption.source_lang, settings.targetLang),
+    parts: `Translate these subtitle segments:\n${userPayload}`,
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: 'Segment id from the request' },
+          text: { type: 'string', description: 'Translated subtitle text' }
+        },
+        required: ['id', 'text']
       }
     }
-  };
+  });
 
-  // 타임아웃 필수: 30초 이상 걸리는 fetch는 SW 종료를 유발할 수 있음 (수명 규칙)
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
-
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.geminiApiKey },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      throw transError('TIMEOUT', `Gemini 응답 시간 초과 (${GEMINI_TIMEOUT_MS / 1000}초)`);
-    }
-    throw transError('NETWORK', `Gemini API에 연결할 수 없습니다: ${e.message}`, { retriable: true });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) {
-    const status = res.status;
-    let detail = '';
-    try { detail = (await res.json())?.error?.message || ''; } catch (e) { /* 무시 */ }
-
-    if (status === 429) {
-      // RPD(일일 한도) 소진은 재시도로 해결 불가 → 별도 코드로 즉시 표면화 (화면 안내)
-      if (/day|daily|PerDay|quota.*exceeded|exhausted/i.test(detail)) {
-        throw transError('QUOTA',
-          'Gemini 무료 사용량(일일 한도)이 소진되었습니다 — 태평양 시간 자정에 리셋됩니다. ' +
-          '설정에서 유료 티어 전환 또는 Claude CLI 경로를 사용하세요.');
-      }
-      // 분당 한도(RPM): Retry-After 존중 후 재시도 (설계서 §4)
-      const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
-      throw transError('RATE_LIMITED', detail || '요청 한도 초과', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });
-    }
-    if (status === 400) throw transError('BAD_REQUEST', detail || '잘못된 요청 (API 키/모델명 확인)');
-    if (status === 401 || status === 403) throw transError('AUTH', detail || 'API 키 인증 실패');
-    if (status >= 500) throw transError('UPSTREAM_ERROR', detail || `Gemini 서버 오류 (${status})`, { retriable: true });
-    throw transError('UNKNOWN', `HTTP ${status}: ${detail}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
   try {
     const arr = JSON.parse(text);
     if (!Array.isArray(arr)) throw new Error('배열 아님');
