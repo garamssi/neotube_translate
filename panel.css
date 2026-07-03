@@ -292,12 +292,12 @@
 /* ── 수동 모드 CTA ──────────────────────────────────────────── */
 .ytx-cta-btn { padding: 6px 14px; font-size: 13.5px; }
 
-/* ── 번역 캐시 목록 (설정 화면 내) ──────────────────────────── */
-.ytx-cache-list {
+/* ── 캐시 관리 전용 뷰 ──────────────────────────────────────── */
+.ytx-cache-items {
   display: flex; flex-direction: column; gap: 2px;
-  max-height: 180px; overflow-y: auto;
-  border: 1px solid var(--ytx-border); border-radius: 8px; padding: 4px;
+  padding: 6px; /* 본문 전체 높이 사용 — body 스크롤에 맡김 */
 }
+.ytx-cache-search { flex: 1; min-width: 0; padding: 6px 10px; }
 .ytx-cache-item {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: 6px;

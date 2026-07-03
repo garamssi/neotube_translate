@@ -38,6 +38,7 @@ const YTX = {
     PLAYER_FALLBACK: '.html5-video-player',
     VIDEO: 'video.html5-main-video',
     NATIVE_CAPTION: '.ytp-caption-window-container',  // 네이티브 자막 컨테이너
+    CC_BUTTON: '.ytp-subtitles-button',               // 자막(CC) 토글 버튼
     CONTROLS_AUTOHIDE_CLASS: 'ytp-autohide',          // 컨트롤바 숨김 상태 클래스
     FULLSCREEN_CLASS: 'ytp-fullscreen',               // 플레이어 전체화면 상태 클래스
     WATCH_FLEXY: 'ytd-watch-flexy',                   // 시청 페이지 루트 (theater/fullscreen 속성 보유)
@@ -49,6 +50,7 @@ const YTX = {
   TIMEDTEXT_URL_PATTERN: '*://*.youtube.com/api/timedtext*', // webRequest 관찰용
   TIMEDTEXT_KEYWORD: 'timedtext',                            // inject.js URL 매칭용
   FALLBACK_REFETCH_DELAY_MS: 4000, // B(인터셉트) 미도착 시 A(재fetch) 가동까지 대기
+  CC_AUTO_ENABLE_DELAY_MS: 3000,   // 능동 취득 실패 시 CC 자동 켜기까지 대기
 
   // ── 번역 파이프라인 (설계서 §4에서 조정) ───────────────────
   // Claude(localhost) 경로: Sonnet 5 최대 출력 128K 토큰·컨텍스트 1M(공식 문서 확인).
@@ -60,8 +62,10 @@ const YTX = {
   // 처리율(TPM)을 넘으면 생성 도중 끊기므로(레이트리밋 재시도 반복의 원인)
   // Claude 경로는 80세그먼트 × 2병렬로 처리율 예산 안에 맞춘다.
   CHUNK_LOCALHOST: { SEGMENTS: 80, CHARS: 10000, FIRST: 20, PARALLEL: 2 },
-  // Gemini 경로: SW fetch 25s 타임아웃(수명 규칙) 안에 응답해야 하므로 보수적 유지
-  CHUNK_GEMINI: { SEGMENTS: 40, CHARS: 4000, FIRST: 20, PARALLEL: 3 },
+  // Gemini 경로: 모델 자체 한도는 입력 1M/출력 65K 토큰(공식 문서 확인)으로 매우 커서
+  // "요청 수 최소화"가 무료 티어(RPM/RPD) 대응의 핵심 — 청크 300세그로 대형화.
+  // (300세그 출력 ≈ 1.2만 토큰, 한도의 20% 미만. 시간 제약은 fetch 타임아웃 120s로 해결)
+  CHUNK_GEMINI: { SEGMENTS: 300, CHARS: 30000, FIRST: 20, PARALLEL: 2 },
   RETRY_BACKOFF_MS: [1000, 4000], // 지수 백오프 2회
   // 설계서 §6의 20s에서 상향: 대형 청크 + Sonnet 지연 대응.
   // SW 30s fetch 수명 규칙은 keepalive(25s 간격 API 호출)로 워커를 유지해 대응.
@@ -80,7 +84,10 @@ const YTX = {
       'gemini-2.5-flash-lite',
       'gemini-2.5-pro'
     ],
-    DEFAULT_MODEL: 'gemini-3.5-flash'
+    DEFAULT_MODEL: 'gemini-3.5-flash',
+    // 사전 페이싱: 호출 간 최소 간격(ms) — 429를 맞기 전에 예방.
+    // 무료 티어는 flash 계열 RPM이 한 자릿수~십수 회 수준(프로젝트 단위)이라 보수적으로.
+    PACING: { free: 6500, paid: 400 }
   },
 
   // ── 설정 기본값 (chrome.storage.local 'settings' 키) ───────
@@ -90,6 +97,7 @@ const YTX = {
     route: 'localhost',         // 'localhost'(Claude CLI 서버, 기본) | 'gemini'
     geminiApiKey: '',
     geminiModel: 'gemini-3.5-flash',
+    geminiTier: 'free',         // 'free'(사전 페이싱 강함) | 'paid'(Tier 1+)
     serverAddress: 'localhost:8787', // Claude CLI 서버 주소 (host:port, LAN 주소 가능)
     targetLang: 'ko',
     summaryLevel: 'standard',   // 요약 수준: 'brief'(짧게) | 'standard'(표준) | 'detailed'(상세)

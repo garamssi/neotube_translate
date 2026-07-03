@@ -104,6 +104,7 @@ function onSegments(msg) {
   state.caption = d;
   state.captionVia = msg.via;
   state.videoId = d.video_id;
+  restoreCcIfForced(); // CC 자동 켜기로 취득했다면 원래 상태(꺼짐)로 복구
   log(`세그먼트 수신 — ${d.video_id} [${d.source_lang}/${d.format}] via=${msg.via}, ${d.segments.length}개`);
 
   state.translations = {};
@@ -310,6 +311,57 @@ function armNoCaptionTimer() {
       renderPanelState();
     }
   }, NO_CAPTION_TIMEOUT_MS);
+  armCcAutoEnable();
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * CC 자동 켜기 폴백 — 능동 취득이 실패한 영상 대응
+ *
+ * 능동 취득(baseUrl fetch)이 서명/POT 정책으로 빈 응답을 주는 영상이
+ * 있어, 일정 시간 내 자막 미확보 시 CC 버튼을 잠깐 켜서 인터셉트(B)로
+ * 취득한 뒤 원래 상태(꺼짐)로 되돌린다.
+ * - 비공개 플레이어 API 대신 접근성 속성(aria-pressed) 기반 클릭 (안정성)
+ * - 켜기 전 네이티브 자막 숨김 클래스를 선적용해 화면 번쩍임 방지
+ * - 자막 없는 영상(버튼 없음/비활성)은 건너뜀 → 기존 '자막 없음' 흐름
+ * ═══════════════════════════════════════════════════════════ */
+let ccAutoTimer = null;
+let ccForcedOn = false; // 우리가 켠 상태 (취득 후 원복 대상)
+
+function armCcAutoEnable() {
+  clearTimeout(ccAutoTimer);
+  ccAutoTimer = setTimeout(() => {
+    if (state.caption || !state.enabled) return; // 이미 확보(능동/인터셉트) 시 불필요
+    tryEnableCcForCapture();
+  }, YTX.CC_AUTO_ENABLE_DELAY_MS);
+}
+
+function tryEnableCcForCapture() {
+  const btn = document.querySelector(YTX.SEL.CC_BUTTON);
+  if (!btn) return; // 플레이어 미준비 — 10초 노캡션 타이머가 후속 처리
+  if (btn.getAttribute('aria-disabled') === 'true') return; // 자막 없는 영상
+  if (btn.getAttribute('aria-pressed') === 'true') return;  // 이미 켜져 있는데 미확보 — 다른 원인
+
+  // 번쩍임 방지: 켜기 전에 네이티브 자막 숨김 (자막 확보 후 syncOverlay가 상태 재정리)
+  getPlayer()?.classList.add('ytx-hide-native');
+  btn.click();
+  ccForcedOn = true;
+  log('자막 미확보 — CC 자동 켜기 (취득 후 원상 복구)');
+}
+
+/** 자막 확보 후: 우리가 켠 CC를 원래 상태(꺼짐)로 되돌림 */
+function restoreCcIfForced() {
+  clearTimeout(ccAutoTimer);
+  if (!ccForcedOn) return;
+  ccForcedOn = false;
+  const btn = document.querySelector(YTX.SEL.CC_BUTTON);
+  if (btn && btn.getAttribute('aria-pressed') === 'true') {
+    btn.click();
+    log('자막 확보 완료 — CC 원상 복구(끔)');
+  }
+  // 오버레이 미사용 상태라면 임시 숨김 클래스 제거 (사용 중이면 syncOverlay가 유지)
+  if (!(state.enabled && state.overlayOn && state.caption)) {
+    getPlayer()?.classList.remove('ytx-hide-native');
+  }
 }
 
 function mountPanel() {
@@ -366,6 +418,8 @@ window.addEventListener('yt-navigate-finish', () => {
   // watch 이탈(홈/검색 등): 패널·오버레이 완전 제거
   if (!location.pathname.startsWith('/watch')) {
     clearTimeout(noCaptionTimer);
+    clearTimeout(ccAutoTimer);
+    ccForcedOn = false;
     panelEl?.remove();
     panelEl = null;
     state.caption = null;
@@ -377,6 +431,7 @@ window.addEventListener('yt-navigate-finish', () => {
   const vid = currentVideoId();
   if (vid && vid !== state.videoId) {
     // 영상 전환: content 상태 리셋 + background 탭 상태/작업 리셋
+    ccForcedOn = false; // 이전 영상에서 켠 CC는 그대로 두고 상태만 리셋 (새 영상에서 재판단)
     chrome.runtime.sendMessage({ type: YTX.MSG.TAB_RESET }).catch(() => {});
     state.caption = null;
     state.captionVia = '';
@@ -388,6 +443,7 @@ window.addEventListener('yt-navigate-finish', () => {
     state.activeSegId = -1;
     state.followSuspended = false;
     state.settingsOpen = false;
+    state.cacheOpen = false;
     state.summaryPhase = 'idle';
     state.summaryByLevel = {};
     state.summaryError = null;

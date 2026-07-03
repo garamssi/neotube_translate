@@ -121,8 +121,8 @@ function renderPanelState() {
   if (!panelEl) return;
 
   panelEl.classList.toggle('ytx-collapsed', state.collapsed);
-  panelEl.classList.toggle('ytx-settings-open', state.settingsOpen);
-  panelEl.querySelector('[data-ytx="gear"]').classList.toggle('ytx-on', state.settingsOpen);
+  panelEl.classList.toggle('ytx-settings-open', state.settingsOpen || state.cacheOpen); // 툴바/푸터 숨김 공용
+  panelEl.querySelector('[data-ytx="gear"]').classList.toggle('ytx-on', state.settingsOpen || state.cacheOpen);
   panelEl.querySelector('[data-ytx="mode-rows"]').classList.toggle('ytx-on', state.mode === 'rows');
   panelEl.querySelector('[data-ytx="mode-para"]').classList.toggle('ytx-on', state.mode === 'para');
   panelEl.querySelector('[data-ytx="mode-summary"]').classList.toggle('ytx-on', state.mode === 'summary');
@@ -159,6 +159,10 @@ function renderPanelState() {
 function renderBody() {
   const body = panelEl.querySelector('[data-ytx="body"]');
 
+  if (state.cacheOpen) {
+    renderCacheView(body); // 캐시 관리 전용 뷰 (설정에서 진입)
+    return;
+  }
   if (state.settingsOpen) {
     renderSettings(body);
     return;
@@ -556,6 +560,7 @@ function errorTitle(code) {
     case 'NO_API_KEY': return 'Gemini API 키가 필요합니다';
     case 'AUTH': return 'API 키 인증에 실패했습니다';
     case 'RATE_LIMITED': return '요청 한도를 초과했습니다';
+    case 'QUOTA': return 'API 무료 사용량이 소진되었습니다';
     case 'TIMEOUT': return '응답 시간이 초과되었습니다';
     case 'UNSUPPORTED_LANG': return '지원하지 않는 언어입니다';
     default: return '번역 중 오류가 발생했습니다';
@@ -573,6 +578,12 @@ function retryTranslation() {
  * 각 컨트롤은 변경 즉시 저장·적용, '완료'는 닫기(+필요 시 재번역).
  * ═══════════════════════════════════════════════════════════ */
 async function toggleSettings() {
+  if (state.cacheOpen) { // 캐시 뷰에서 기어 클릭 → 전부 닫기
+    state.cacheOpen = false;
+    state.settingsOpen = false;
+    renderPanelState();
+    return;
+  }
   if (state.settingsOpen) return closeSettings();
   const s = await loadSettingsRaw();
   state.settingsDraft = { ...s };
@@ -636,6 +647,13 @@ function renderSettings(body) {
       <div class="ytx-field">
         <div class="ytx-field-label">Gemini 모델</div>
         <select class="ytx-select" data-ytx="set-model">${modelOptions}</select>
+      </div>
+      <div class="ytx-field">
+        <div class="ytx-field-label">요금제 티어 ${helpIconHtml('무료 티어는 분당/일일 요청 한도가 매우 낮아\n호출 간격을 자동으로 띄웁니다(429 예방).\n결제 계정 연결(Tier 1+) 시 유료를 선택하면 빨라집니다.')}</div>
+        <select class="ytx-select" data-ytx="set-tier">
+          <option value="free"${d.geminiTier !== 'paid' ? ' selected' : ''}>무료 (호출 간격 자동 조절)</option>
+          <option value="paid"${d.geminiTier === 'paid' ? ' selected' : ''}>유료 Tier 1+ (빠름)</option>
+        </select>
       </div>`}
 
       <div class="ytx-field">
@@ -695,12 +713,10 @@ function renderSettings(body) {
       </div>
 
       <div class="ytx-field">
-        <div class="ytx-field-label">번역 캐시 (재방문 시 즉시 표시용)</div>
-        <div class="ytx-cache-list" data-ytx="cache-list">
-          <div class="ytx-field-hint">불러오는 중…</div>
-        </div>
-        <div class="ytx-field-row" style="justify-content: flex-end;">
-          <button class="ytx-ghost-btn" data-ytx="cache-clear">전체 삭제</button>
+        <div class="ytx-field-label">번역·요약 캐시 (재방문 시 즉시 표시용)</div>
+        <div class="ytx-field-row">
+          <div class="ytx-field-row-label" data-ytx="cache-summary">불러오는 중…</div>
+          <button class="ytx-primary-btn ytx-cta-btn" data-ytx="cache-open">캐시 관리</button>
         </div>
       </div>
 
@@ -710,30 +726,53 @@ function renderSettings(body) {
     </div>`;
 
   bindSettingsEvents(body);
-  renderCacheList(body); // 비동기 로드
+  fillCacheSummary(body); // 비동기: "N개 · X MB"
 }
 
-/* ── 번역 캐시 목록 (설정 화면 내) ─────────────────────────── */
+/** 설정 화면의 캐시 요약 한 줄 */
+async function fillCacheSummary(body) {
+  const el = body.querySelector('[data-ytx="cache-summary"]');
+  if (!el) return;
+  const entries = await loadCacheEntries();
+  const bytes = entries.reduce((s, e) => s + e.size, 0);
+  el.textContent = entries.length
+    ? `${entries.length}개 저장됨 · ${fmtBytes(bytes)}`
+    : '저장된 캐시 없음';
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * 캐시 관리 전용 뷰 — 패널 본문 전체 사용 (설정에서 진입)
+ * 검색 · 타입 필터(전체/번역/요약) · 개수/용량 표시 · 개별/전체 삭제
+ * ═══════════════════════════════════════════════════════════ */
+let cacheQuery = '';   // 세션 내 유지되는 검색어/필터
+let cacheTypeFilter = 'all'; // 'all' | 'trans' | 'sum'
+
 function fmtCacheDate(ts) {
   if (!ts) return '';
   const d = new Date(ts * 1000);
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-async function renderCacheList(body) {
-  const listEl = body.querySelector('[data-ytx="cache-list"]');
-  if (!listEl) return;
+function fmtBytes(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
 
+/** storage → 캐시 항목 배열 (크기 포함, 최신순) */
+async function loadCacheEntries() {
   let all = {};
   try { all = await chrome.storage.local.get(null); } catch (e) { /* 무시 */ }
 
-  const entries = Object.entries(all)
+  return Object.entries(all)
     .filter(([k]) => k.startsWith(YTX.STORAGE.CACHE_PREFIX + '|') || k.startsWith(YTX.STORAGE.SUM_PREFIX + '|'))
     .map(([key, v]) => {
       const parts = key.split('|');
       const isSum = parts[0] === YTX.STORAGE.SUM_PREFIX;
+      let size = 0;
+      try { size = JSON.stringify(v).length; } catch (e) { /* 무시 */ }
       return {
-        key, isSum,
+        key, isSum, size,
         videoId: parts[1], lang: parts[2], route: parts[3],
         model: isSum ? parts[4] : '',
         level: isSum ? (parts[5] || parts[4]) : '', // 구키(모델 없는 형식) 호환
@@ -744,31 +783,107 @@ async function renderCacheList(body) {
       };
     })
     .sort((a, b) => b.cachedAt - a.cachedAt);
+}
 
-  if (entries.length === 0) {
-    listEl.innerHTML = '<div class="ytx-field-hint">저장된 캐시가 없습니다.</div>';
-    return;
-  }
-
-  listEl.innerHTML = entries.map((e) => {
-    const kind = e.isSum
-      ? `요약(${levelLabel(e.level)}${e.model && e.model !== e.level ? '·' + e.model : ''})`
-      : `번역 ${e.count}개${e.complete ? '' : ' · 부분'}`;
-    return `
-    <div class="ytx-cache-item">
-      <div class="ytx-cache-info">
-        <div class="ytx-cache-title" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
-        <div class="ytx-cache-meta">${kind} · → ${escapeHtml((e.lang || '?').toUpperCase())} · ${e.route === 'gemini' ? 'Gemini' : 'Claude'} · ${fmtCacheDate(e.cachedAt)}</div>
+function renderCacheView(body) {
+  body.innerHTML = `
+    <div class="ytx-progress">
+      <div class="ytx-progress-row">
+        <button class="ytx-icon-btn" data-ytx="cache-back" title="설정으로 돌아가기">←</button>
+        <div class="ytx-progress-label" style="font-weight:700;">캐시 관리</div>
+        <div class="ytx-progress-route" data-ytx="cache-stats"></div>
+        <button class="ytx-ghost-btn ytx-cta-btn" data-ytx="cache-clear">전체 삭제</button>
       </div>
-      <button class="ytx-icon-btn ytx-cache-del" data-key="${escapeHtml(e.key)}" title="이 캐시 삭제">✕</button>
+      <div class="ytx-progress-row" style="margin-top:8px;">
+        <input type="text" class="ytx-input ytx-cache-search" placeholder="제목 검색…" data-ytx="cache-search" value="${escapeHtml(cacheQuery)}" spellcheck="false">
+        <button class="ytx-chip-btn${cacheTypeFilter === 'all' ? ' ytx-on' : ''}" data-ytx="cf-all">전체</button>
+        <button class="ytx-chip-btn${cacheTypeFilter === 'trans' ? ' ytx-on' : ''}" data-ytx="cf-trans">번역</button>
+        <button class="ytx-chip-btn${cacheTypeFilter === 'sum' ? ' ytx-on' : ''}" data-ytx="cf-sum">요약</button>
+      </div>
+    </div>
+    <div class="ytx-cache-items" data-ytx="cache-items">
+      <div class="ytx-empty"><div class="ytx-empty-desc">불러오는 중…</div></div>
     </div>`;
-  }).join('');
 
-  listEl.querySelectorAll('.ytx-cache-del').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      try { await chrome.storage.local.remove(btn.dataset.key); } catch (e) { /* 무시 */ }
-      renderCacheList(body);
+  let entries = [];
+
+  const refreshList = () => {
+    const itemsEl = body.querySelector('[data-ytx="cache-items"]');
+    const statsEl = body.querySelector('[data-ytx="cache-stats"]');
+    if (!itemsEl) return;
+
+    const q = cacheQuery.trim().toLowerCase();
+    const filtered = entries.filter((e) => {
+      if (cacheTypeFilter === 'trans' && e.isSum) return false;
+      if (cacheTypeFilter === 'sum' && !e.isSum) return false;
+      if (q && !e.title.toLowerCase().includes(q)) return false;
+      return true;
     });
+
+    const totalBytes = entries.reduce((s, e) => s + e.size, 0);
+    statsEl.textContent = `${filtered.length}/${entries.length}개 · ${fmtBytes(totalBytes)}`;
+
+    if (filtered.length === 0) {
+      itemsEl.innerHTML = '<div class="ytx-empty"><div class="ytx-empty-desc">' +
+        (entries.length === 0 ? '저장된 캐시가 없습니다.' : '검색/필터 결과가 없습니다.') + '</div></div>';
+      return;
+    }
+
+    itemsEl.innerHTML = filtered.map((e) => {
+      const kind = e.isSum
+        ? `요약(${levelLabel(e.level)}${e.model && e.model !== e.level ? '·' + e.model : ''})`
+        : `번역 ${e.count}개${e.complete ? '' : ' · 부분'}`;
+      return `
+      <div class="ytx-cache-item">
+        <div class="ytx-cache-info">
+          <div class="ytx-cache-title" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
+          <div class="ytx-cache-meta">${kind} · → ${escapeHtml((e.lang || '?').toUpperCase())} · ${e.route === 'gemini' ? 'Gemini' : 'Claude'} · ${fmtBytes(e.size)} · ${fmtCacheDate(e.cachedAt)}</div>
+        </div>
+        <button class="ytx-icon-btn ytx-cache-del" data-key="${escapeHtml(e.key)}" title="이 캐시 삭제">✕</button>
+      </div>`;
+    }).join('');
+
+    itemsEl.querySelectorAll('.ytx-cache-del').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try { await chrome.storage.local.remove(btn.dataset.key); } catch (e) { /* 무시 */ }
+        entries = entries.filter((e) => e.key !== btn.dataset.key);
+        refreshList();
+      });
+    });
+  };
+
+  // ── 이벤트 바인딩 (검색은 목록만 갱신 — 입력 포커스 유지) ──
+  body.querySelector('[data-ytx="cache-back"]').addEventListener('click', () => {
+    state.cacheOpen = false;
+    state.settingsOpen = true;
+    renderPanelState();
+  });
+  body.querySelector('[data-ytx="cache-search"]').addEventListener('input', (e) => {
+    cacheQuery = e.target.value;
+    refreshList();
+  });
+  const setFilter = (type) => {
+    cacheTypeFilter = type;
+    body.querySelector('[data-ytx="cf-all"]').classList.toggle('ytx-on', type === 'all');
+    body.querySelector('[data-ytx="cf-trans"]').classList.toggle('ytx-on', type === 'trans');
+    body.querySelector('[data-ytx="cf-sum"]').classList.toggle('ytx-on', type === 'sum');
+    refreshList();
+  };
+  body.querySelector('[data-ytx="cf-all"]').addEventListener('click', () => setFilter('all'));
+  body.querySelector('[data-ytx="cf-trans"]').addEventListener('click', () => setFilter('trans'));
+  body.querySelector('[data-ytx="cf-sum"]').addEventListener('click', () => setFilter('sum'));
+  body.querySelector('[data-ytx="cache-clear"]').addEventListener('click', async () => {
+    try {
+      const keys = entries.map((e) => e.key);
+      if (keys.length) await chrome.storage.local.remove(keys);
+    } catch (e) { /* 무시 */ }
+    entries = [];
+    refreshList();
+  });
+
+  loadCacheEntries().then((list) => {
+    entries = list;
+    refreshList();
   });
 }
 
@@ -803,6 +918,7 @@ function bindSettingsEvents(body) {
   });
   body.querySelector('[data-ytx="set-key"]')?.addEventListener('change', (e) => apply({ geminiApiKey: e.target.value.trim() }));
   body.querySelector('[data-ytx="set-model"]')?.addEventListener('change', (e) => apply({ geminiModel: e.target.value }));
+  body.querySelector('[data-ytx="set-tier"]')?.addEventListener('change', (e) => apply({ geminiTier: e.target.value }));
 
   body.querySelector('[data-ytx="set-autotrans"]').addEventListener('click', (e) => {
     const next = !state.settingsDraft.autoTranslate;
@@ -815,14 +931,10 @@ function bindSettingsEvents(body) {
     }
   });
 
-  body.querySelector('[data-ytx="cache-clear"]').addEventListener('click', async () => {
-    try {
-      const all = await chrome.storage.local.get(null);
-      const keys = Object.keys(all).filter((k) =>
-        k.startsWith(YTX.STORAGE.CACHE_PREFIX + '|') || k.startsWith(YTX.STORAGE.SUM_PREFIX + '|'));
-      if (keys.length) await chrome.storage.local.remove(keys);
-    } catch (e) { /* 무시 */ }
-    renderCacheList(body);
+  body.querySelector('[data-ytx="cache-open"]').addEventListener('click', () => {
+    state.settingsOpen = false;
+    state.cacheOpen = true;
+    renderPanelState();
   });
 
   body.querySelector('[data-ytx="set-lang"]').addEventListener('change', (e) => apply({ targetLang: e.target.value }));
