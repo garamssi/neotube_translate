@@ -15,6 +15,15 @@ node translate-server.js            # 기본 포트 8787
 node translate-server.js 9000       # 포트 지정
 ```
 
+간편 실행 스크립트:
+
+| 플랫폼 | 방법 |
+|---|---|
+| macOS | `start-server.command` 더블클릭 (nvm 자동 로드) 또는 `./start-server.command` |
+| Windows | `start-server.bat` 더블클릭 (PowerShell 실행 정책 우회 포함) — 처음이라면 [SETUP-WINDOWS.md](./SETUP-WINDOWS.md) 참고 |
+
+두 스크립트 모두 동일 동작: 기존 포트 점유 프로세스 정리 → 서버 실행 → 종료 시 창 유지.
+
 환경변수:
 
 | 변수 | 기본값 | 설명 |
