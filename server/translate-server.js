@@ -38,9 +38,20 @@ const { spawn, execFileSync } = require('child_process');
 const PORT = parseInt(process.env.PORT || process.argv[2] || '8787', 10);
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'sonnet'; // 기본: Sonnet 5 (CLI 별칭 'sonnet' = 최신 Sonnet)
-const CLI_TIMEOUT_MS = 150000; // 확장의 요청 타임아웃(150s)과 동일 상한
+const CLI_TIMEOUT_MS = 180000; // 확장의 요청 타임아웃(180s)과 동일 상한 — 큰 청크(120세그) 생성시간 대비
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+
+/* CLAUDE_BIN 실행 방식 결정 — 값이 .js/.mjs면 node로 실행하고(윈도우 npm .cmd
+   래퍼 우회: Node는 보안상 .cmd를 shell 없이 spawn하지 못함), 그 외(.exe/실행파일/
+   PATH의 claude)는 그대로 실행한다. 크로스플랫폼이며 shell을 쓰지 않는다. */
+function claudeInvocation() {
+  const lower = CLAUDE_BIN.toLowerCase();
+  if (lower.endsWith('.js') || lower.endsWith('.mjs')) {
+    return { cmd: process.execPath, prefix: [CLAUDE_BIN] };
+  }
+  return { cmd: CLAUDE_BIN, prefix: [] };
+}
 
 /* ── 응답 헬퍼 ─────────────────────────────────────────────── */
 function sendJson(res, status, obj) {
@@ -83,12 +94,13 @@ function releaseSlot() {
 function runClaude(prompt, opts = {}) {
   const task = () => new Promise((resolve, reject) => {
     // 검증된 최소 호출: 프롬프트를 argv로 전달, stdin 미사용
-    const args = ['-p', prompt];
+    const inv = claudeInvocation();
+    const args = [...inv.prefix, '-p', prompt];
     const model = opts.model || CLAUDE_MODEL; // 요청별 모델 오버라이드 (요약 등)
     if (model) args.push('--model', model);
     if (opts.effort) args.push('--effort', opts.effort); // low: 사고 최소화 → 응답 속도·일관성 향상
 
-    const child = spawn(CLAUDE_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(inv.cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
     let stdout = '', stderr = '';
     const killer = setTimeout(() => {
@@ -356,12 +368,10 @@ const server = http.createServer((req, res) => {
 
 /* ── 시작 시 CLI 확인 + 인증 자가 테스트 ───────────────────── */
 try {
-  const version = execFileSync(CLAUDE_BIN, ['--version'], { encoding: 'utf-8', timeout: 5000 }).trim();
+  const inv = claudeInvocation();
+  const version = execFileSync(inv.cmd, [...inv.prefix, '--version'], { encoding: 'utf-8', timeout: 10000 }).trim();
   log(`Claude CLI: ${version}`);
-  try {
-    const bin = execFileSync(process.platform === 'win32' ? 'where' : 'which', [CLAUDE_BIN], { encoding: 'utf-8', timeout: 3000 }).trim();
-    log(`CLI 경로: ${bin}`);
-  } catch (e) { /* 무시 */ }
+  log(`CLI 실행: ${inv.cmd}${inv.prefix.length ? ' ' + inv.prefix.join(' ') : ''}`);
 
   // 인증 소스 진단 (우선순위: CLI 로그인(OAuth) 기준으로 안내)
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {

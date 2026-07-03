@@ -70,14 +70,24 @@ claude -p "hi"    # 짧은 응답이 나오면 인증 완료
 
 프로젝트의 `server` 폴더에서 **`start-server.bat` 더블클릭** — 끝입니다.
 
-스크립트가 자동으로 처리하는 것: PowerShell 실행 정책 우회 → node/claude 존재 확인 →
+스크립트가 자동으로 처리하는 것: PowerShell 실행 정책 우회 → node/claude 탐지 →
 기존 8787 포트 점유 프로세스 정리 → 서버 실행.
+
+> **다른 PC로 옮겼을 때도 동작합니다.** 런처는 `node`/`claude`가 PATH에 없어도
+> 표준 설치 위치를 자동 탐색합니다:
+> - Node: `%ProgramFiles%\nodejs\node.exe`, `%LOCALAPPDATA%\Programs\nodejs`, nvm 등
+> - Claude(네이티브): `%USERPROFILE%\.local\bin\claude.exe`
+> - Claude(npm 전역): `node_modules\@anthropic-ai\claude-code\cli.js` — Node는 보안상 `.cmd`를
+>   직접 실행하지 못하므로, 내부 `cli.js`를 찾아 `node`로 실행합니다.
+>
+> 네이티브 설치 후 PATH 등록이 누락돼도 새 창을 열 필요 없이 바로 실행되며,
+> 모든 경로는 스크립트 위치 기준(상대)이라 폴더를 옮겨도 그대로 동작합니다.
 
 정상 시작 로그 예시:
 
 ```
 Claude CLI: x.x.x (Claude Code)
-CLI 경로: C:\...\claude
+CLI 실행: C:\...\claude.exe  (또는  node ...\cli.js)
 인증: CLI 로그인(OAuth) 사용 예정
 translate-server 시작 — http://127.0.0.1:8787/translate (엔진: claude -p, 모델: sonnet)
 인증 자가 테스트 중… (claude 1회 호출)
@@ -107,7 +117,7 @@ $env:PORT = "9000"; .\start-server.bat
 | 증상 | 원인/해결 |
 |---|---|
 | 창이 뜨자마자 "node를 찾을 수 없습니다" | Node 미설치 또는 PATH 미갱신 — 1번 수행 후 새 창에서 재시도 |
-| `자가 테스트 실패: ... 로그인 정보를 찾지 못했습니다` | 3번(로그인) 미완료, 또는 PATH에 로그인 안 된 claude가 잡힘 — 시작 로그의 `CLI 경로`와 `(Get-Command claude).Source` 비교 |
+| `자가 테스트 실패: ... 로그인 정보를 찾지 못했습니다` | 대개 3번(로그인) 미완료. 런처가 `%USERPROFILE%\.local\bin\claude.exe`를 자동으로 잡아 쓰므로, 그 claude로 `/login`을 마쳤는지 확인 (시작 로그의 `Claude CLI:` 경로 참고) |
 | `자가 테스트 실패: 일시 제한` | 계정 처리율/사용량 제한 — 잠시 후 재시도 |
 | .ps1 직접 더블클릭 시 아무 반응 없음 | 정상입니다 — **.bat을 더블클릭**하세요 (실행 정책 우회 포함) |
 | 확장에서 "서버에 연결할 수 없습니다" | 서버 창이 꺼져 있거나 포트 불일치 — 4번 로그와 확장 설정의 서버 주소 확인 |
