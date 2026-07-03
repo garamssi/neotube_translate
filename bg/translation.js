@@ -43,10 +43,10 @@ function keepaliveRelease() {
   }
 }
 
-// fetch 응답이 30초를 넘으면 SW가 종료될 수 있으므로(공식 수명 규칙),
-// Gemini 호출에 30초 미만의 명시적 타임아웃을 둔다.
-// (localhost는 keepalive 유지 하에 YTX.LOCALHOST_TIMEOUT_MS 적용)
-const GEMINI_TIMEOUT_MS = 25000;
+// Gemini 대형 청크(300세그) 생성 시간 확보를 위해 120초.
+// SW 수명은 작업 중 상시 가동되는 keepalive(25초 간격 API 호출)로 유지 —
+// URL 요약(180s)과 동일 방식. 종료가 관찰되면 offscreen document로 이전 (확인 필요)
+const GEMINI_TIMEOUT_MS = 120000;
 
 /* ═══════════════════════════════════════════════════════════
  * 설정 · 캐시
@@ -279,8 +279,8 @@ async function runTranslationJobInner(tabId, caption, title) {
         ids: chunk.map((s) => s.id),
         routeLabel
       });
-      // BAD_REQUEST/UNSUPPORTED_LANG/AUTH는 이후 청크도 같은 결과 — 작업 중단
-      if (['BAD_REQUEST', 'UNSUPPORTED_LANG', 'AUTH'].includes(err.code)) fatal = true;
+      // BAD_REQUEST/UNSUPPORTED_LANG/AUTH/QUOTA는 이후 청크도 같은 결과 — 작업 중단
+      if (['BAD_REQUEST', 'UNSUPPORTED_LANG', 'AUTH', 'QUOTA'].includes(err.code)) fatal = true;
     }
   }
 
@@ -319,6 +319,25 @@ async function runTranslationJobInner(tabId, caption, title) {
     targetLang
   });
   log(`번역 작업 종료 — ${Object.keys(translations).length}/${totalSegs} 세그먼트, 실패 청크 ${failedChunks.length}개`);
+}
+
+/* ── Gemini 사전 페이싱 게이트 ──────────────────────────────
+ * 무료 티어의 낮은 RPM에 걸리지 않도록, 429를 맞기 전에 호출 간격을
+ * 강제한다. 번역 청크·요약 등 모든 Gemini 호출이 이 게이트를 공유하며,
+ * 병렬 워커도 게이트를 통과하는 순서대로 자연히 직렬화된다. */
+let geminiNextSlotAt = 0;
+
+async function acquireGeminiSlot(settings, alive) {
+  const interval = YTX.GEMINI.PACING[settings.geminiTier === 'paid' ? 'paid' : 'free'];
+  for (;;) {
+    const now = Date.now();
+    if (now >= geminiNextSlotAt) {
+      geminiNextSlotAt = now + interval;
+      return;
+    }
+    if (alive && !alive()) throw transError('CANCELLED', '작업 취소됨');
+    await sleep(Math.min(geminiNextSlotAt - now, 500));
+  }
 }
 
 /* ── 공유 레이트리밋 쿨다운 ──────────────────────────────────
@@ -409,6 +428,7 @@ function buildTranslatorPrompt(sourceLang, targetLang) {
  * - 시스템 프롬프트: systemInstruction 필드
  * ═══════════════════════════════════════════════════════════ */
 async function callGemini(chunk, caption, settings) {
+  await acquireGeminiSlot(settings); // 사전 페이싱 — 429 예방
   const model = settings.geminiModel || YTX.GEMINI.DEFAULT_MODEL;
   const url = `${YTX.GEMINI.API_BASE}/${encodeURIComponent(model)}:generateContent`;
   const userPayload = JSON.stringify(chunk.map((s) => ({ id: s.id, text: s.text })));
@@ -463,7 +483,13 @@ async function callGemini(chunk, caption, settings) {
     try { detail = (await res.json())?.error?.message || ''; } catch (e) { /* 무시 */ }
 
     if (status === 429) {
-      // Retry-After 헤더(초) 존중 (설계서 §4)
+      // RPD(일일 한도) 소진은 재시도로 해결 불가 → 별도 코드로 즉시 표면화 (화면 안내)
+      if (/day|daily|PerDay|quota.*exceeded|exhausted/i.test(detail)) {
+        throw transError('QUOTA',
+          'Gemini 무료 사용량(일일 한도)이 소진되었습니다 — 태평양 시간 자정에 리셋됩니다. ' +
+          '설정에서 유료 티어 전환 또는 Claude CLI 경로를 사용하세요.');
+      }
+      // 분당 한도(RPM): Retry-After 존중 후 재시도 (설계서 §4)
       const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
       throw transError('RATE_LIMITED', detail || '요청 한도 초과', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });
     }

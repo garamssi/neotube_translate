@@ -261,6 +261,7 @@ const GEMINI_VIDEO_TIMEOUT_MS = 180000;
  * @param parts 문자열(텍스트 콘텐츠) 또는 Gemini parts 배열(fileData 포함 가능)
  */
 async function geminiJsonCall(settings, instruction, parts, schema, timeoutMs) {
+  await acquireGeminiSlot(settings); // 사전 페이싱 — 429 예방 (번역과 게이트 공유)
   const model = settings.geminiModel || YTX.GEMINI.DEFAULT_MODEL;
   const url = `${YTX.GEMINI.API_BASE}/${encodeURIComponent(model)}:generateContent`;
   const timeout = timeoutMs || GEMINI_TIMEOUT_MS;
@@ -297,6 +298,11 @@ async function geminiJsonCall(settings, instruction, parts, schema, timeoutMs) {
     let detail = '';
     try { detail = (await res.json())?.error?.message || ''; } catch (e) { /* 무시 */ }
     if (status === 429) {
+      if (/day|daily|PerDay|quota.*exceeded|exhausted/i.test(detail)) {
+        throw transError('QUOTA',
+          'Gemini 무료 사용량(일일 한도)이 소진되었습니다 — 태평양 시간 자정에 리셋됩니다. ' +
+          '설정에서 유료 티어 전환 또는 Claude CLI 경로를 사용하세요.');
+      }
       const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
       throw transError('RATE_LIMITED', detail || '요청 한도 초과', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });
     }
