@@ -1,79 +1,118 @@
-# 유튜브 AI 번역 크롬 익스텐션
+<p align="center">
+  <img src="icons/icon128.png" width="88" alt="">
+</p>
 
-유튜브 자막을 가로채 AI로 번역하고, 우측 **스크립트 패널**과 **영상 자막 오버레이** 두 곳에 표시하는 Manifest V3 확장.
-기준 문서: 설계서 v1, 스크립트 패널 목업, 구현 지시 프롬프트(우선).
+<h1 align="center">YouTube AI Subtitle Translator</h1>
+
+<p align="center">
+  유튜브 자막을 AI로 번역해서 <b>스크립트 패널</b>과 <b>영상 위 자막</b>으로 보여주는 크롬 확장.<br>
+  번역 엔진은 내 것을 쓴다 — Claude 구독(CLI) 또는 본인의 Gemini API 키. 개발자 서버는 없다.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Manifest-V3-4285F4" alt="Manifest V3">
+  <img src="https://img.shields.io/badge/Chrome-111%2B-34A853" alt="Chrome 111+">
+  <img src="https://img.shields.io/badge/version-0.1.1-333333" alt="v0.1.1">
+</p>
+
+## 기능
+
+| | |
+|---|---|
+| 스크립트 패널 | 시청 페이지 우측에 붙는 번역 자막 패널. 타임스탬프 목록/문단 보기, 재생 위치 하이라이트와 자동 스크롤, 줄 클릭으로 해당 시점 이동 |
+| 오버레이 자막 | 번역 자막을 영상 위에 직접 렌더. 교체/원문 병기 모드, 글자 크기 3단계, 극장·전체화면 추종, 컨트롤바 회피 |
+| 영상 요약 | TL;DR + 클릭하면 이동되는 구간 타임라인. 짧게/표준/상세 3단계, 수준별 모델 자동 매칭 |
+| 수동 우선 | 기본은 수동 — 번역 버튼을 누르기 전엔 아무것도 전송하지 않는다 (자동 번역은 옵션) |
+| 로컬 캐시 | 번역·요약 결과를 영상별로 저장해 재방문 시 즉시 표시. 검색·필터·개별/전체 삭제가 되는 캐시 관리 화면 내장 |
+
+## 동작 구조
+
+```
+YouTube 시청 페이지
+ │  inject.js(MAIN world)가 자막(timedtext) 응답을 가로채고,
+ │  플레이어 응답에서 자막 트랙 URL을 추출
+ ▼
+Service Worker ─ 정규화 → 청크 분할 → 병렬 번역 → 완료분부터 패널·오버레이에 반영
+ │
+ ├─▶ Claude CLI 서버  (localhost:8787, claude -p 호출) ← 기본
+ └─▶ Gemini API      (generateContent, 본인 키)
+```
+
+자막은 세 경로로 취득한다. ① 플레이어 응답의 트랙 URL로 능동 fetch(CC를 켜지 않아도 됨) → ② 페이지의 자막 요청 가로채기 → ③ webRequest로 관찰한 URL 재요청. 셋 다 실패하면 CC를 잠깐 켜서 받아온 뒤 원래 상태로 되돌린다.
 
 ## 설치
 
-1. `chrome://extensions` → 개발자 모드 ON → "압축해제된 확장 프로그램 로드" → 이 폴더 선택
-2. 번역 경로 준비 (기본: **Claude localhost 서버**)
-   ```bash
-   node server/translate-server.js     # 기본 포트 8787, Claude CLI 로그인 필요
-   ```
-   또는 패널 설정(⚙)에서 Gemini API 키 입력 후 Gemini 경로 선택
-3. 자막(CC)이 있는 유튜브 영상 재생 → 자막 버튼 ON
+### 1. 확장 로드
 
-## 파일 구성
+`chrome://extensions` → 개발자 모드 ON → **압축해제된 확장 프로그램 로드** → 이 폴더 선택
 
-계층별로 분리되어 있으며, 로드 순서(manifest의 js 배열 / importScripts)가 곧 의존 방향이다.
+### 2. 번역 엔진 준비 (택1)
 
-| 파일 | 역할 |
+**Claude CLI — 기본.** Node.js 18+와 로그인된 Claude Code CLI가 필요하다.
+
+| 플랫폼 | 실행 |
 |---|---|
-| `manifest.json` | MV3 선언, MAIN world 주입, 액션 팝업 |
-| `constants.js` | 셀렉터·메시지 타입·설정 기본값·청크 한도 단일 모듈 |
-| `inject.js` | (MAIN world) fetch/XHR 비파괴 래핑 — timedtext 인터셉트 + 플레이어 응답 트랙 추출 |
-| `content/core.js` | 공유 상태 · 유틸 · 설정 저장소 |
-| `content/panel.js` | 스크립트 패널 뷰 (DOM 생성 · 상태 5종 렌더 · 인라인 설정) |
-| `content/overlay.js` | 영상 오버레이 뷰 (rAF 동기화 · 교체/병기) |
-| `content/main.js` | 컨트롤러 — 메시지 라우팅 · 재생 동기화 · 마운트 · SPA/극장 처리 |
-| `bg/parsers.js` | 자막 파싱·정규화 (json3/vtt, 순수 함수) |
-| `bg/capture.js` | 자막 취득 3경로 (능동 취득 / 인터셉트 / webRequest 폴백) |
-| `bg/translation.js` | 번역 오케스트레이터 (청크·병렬·재시도·캐시) + Gemini/localhost 어댑터 |
-| `background.js` | 서비스 워커 진입점 (메시지 라우터) |
-| `panel.css` / `overlay.css` | 목업 시각 사양 / 오버레이 스타일 |
-| `popup.html` / `popup.js` | 액션 팝업 (전체 on/off + 경로 요약) |
-| `server/translate-server.js` | Claude CLI(`claude -p`) 기반 localhost 번역 서버 (§6 계약) |
+| macOS | `server/start-server.command` 더블클릭 |
+| Windows | `server/start-server.bat` 더블클릭 — 처음이면 [SETUP-WINDOWS.md](server/SETUP-WINDOWS.md) |
 
-## 번역 경로
+`npm install`은 필요 없다(서버 의존성 0개). 창에 "자가 테스트 통과"가 뜨면 준비 완료.
+환경변수, LAN 공유, "Not logged in" 해결 등 상세는 [server/README.md](server/README.md).
 
-- **Claude (localhost, 기본)**: `POST http://localhost:{port}/translate` — 계약은 설계서 §6.
-  서버 내부는 `claude -p --output-format json` 호출. 상세는 `server/README.md`.
-- **Gemini API**: 사용자 키로 `generateContent` 직접 호출. 구조화 출력(`responseFormat`) 사용.
-  모델 선택: gemini-3.5-flash(기본) / 3.1-flash-lite / 2.5-flash / 2.5-flash-lite / 2.5-pro
-  (2026-06 공식 문서 기준 구조화 출력 지원 안정판)
+**Gemini API.** [Google AI Studio](https://aistudio.google.com/apikey)에서 키 발급 → 패널 설정(⚙)에서 번역 경로를 Gemini로 바꾸고 키 입력. 무료 키라면 티어를 "무료"로 두면 분당 호출 제한에 맞춰 간격을 자동 조절한다.
 
-## 수용 기준 체크리스트 (지시서 §7)
+## 사용법
 
-- [x] 자막 자동 취득·정규화 — B(인터셉트) 주경로 + A(webRequest 재fetch) 폴백. 파서 단위 테스트 통과
-- [x] 패널이 플레이어 크기 변경 없이 `#secondary` 최상단에 삽입 (jsdom 검증)
-- [x] Gemini/localhost 두 경로 번역 + 완료분부터 점진 표시 (모의 서버 테스트)
-- [x] 청크 실패 격리 + 성공분 유지 (BAD_REQUEST 격리 테스트 통과)
-- [x] 재방문 시 캐시 즉시 표시 (`video_id+target_lang+경로` 키)
-- [x] 패널: 목록/문단, 원문 병기, 하이라이트, 자동 스크롤(+재활성 버튼), 클릭 seek
-- [x] 오버레이: 재생 중 현재 구간 표시, 플레이어 내부 부착으로 전체화면/극장 추종
-- [x] 오버레이 교체/병기, 폰트 소/중/대, on/off 토글
-- [x] 오버레이 컨트롤바 회피 (`ytp-autohide` 관찰 → 상승)
-- [x] 영상 전환(SPA) 시 패널·오버레이 리셋 + bg 작업 무효화(TAB_RESET)
-- [x] 상태 5종 시각 구분 (취득중/번역중/완료/오류/자막없음)
+자막(CC)이 있는 영상을 열면 우측에 패널이 나타난다. **번역** 버튼을 누르면 시작되고, 완료된 부분부터 바로 표시된다. 요약은 요약 탭에서 수준을 고르고 실행하면 된다 — Gemini 경로에서는 자막 대신 영상 URL만 보내 Gemini가 영상을 직접 분석한다.
 
-주: 자동화 테스트(jsdom·모의 서버) 기준. 실제 유튜브 페이지에서의 최종 확인은 아래 실측 항목과 함께 수행 필요.
+주요 설정(패널 ⚙):
 
-## 구현 시 택1 결정 사항 (지시서 §6.4, §6.7, §9)
+| 설정 | 기본값 | 비고 |
+|---|---|---|
+| 번역 경로 | Claude CLI | Gemini API로 전환 가능 |
+| 서버 주소 | `localhost:8787` | LAN의 다른 PC 주소도 가능 |
+| 자동 번역 | 꺼짐 | 켜면 영상을 열 때 바로 번역 |
+| Gemini 티어 | 무료 | 무료/유료에 따라 호출 간격 조절 |
+| 요약 수준 · 모델 | 표준 · 자동 | 자동 = 짧게는 haiku, 표준·상세는 sonnet |
+| 오버레이 | 켜짐 · 교체 | 병기 모드, 글자 크기 소/중/대 |
 
-- 병기 모드 원문: **원문·번역 모두 자체 오버레이 렌더** — 싱크 보장·유튜브 DOM 비의존 (overlay.css 주석)
-- 교체 모드 미번역 구간: **원문 임시 표시** (이탤릭·회색)
-- 자막 트랙 다중: **최신 트랙 우선(latest wins)** — 사용자의 CC 선택 = 번역 소스
-- json3 `aAppend`(ASR 이어붙기) 이벤트: 스킵 처리, 실측 후 보강 (background.js 주석)
+## 프로젝트 구조
 
-## 실측 확인 필요 (지시서 §9 — 코드에 "확인 필요" 주석)
+```
+├─ manifest.json
+├─ constants.js            셀렉터 · 메시지 타입 · 청크 한도 · 기본 설정 (단일 소스)
+├─ inject.js               MAIN world — fetch/XHR 래핑으로 자막 응답 가로채기
+├─ background.js           서비스 워커 진입점 (메시지 라우터)
+├─ bg/
+│   ├─ parsers.js          json3/vtt 파싱 · 정규화 (순수 함수)
+│   ├─ capture.js          자막 취득 3경로 + 폴백
+│   ├─ translation.js      번역 파이프라인 (청크 · 병렬 · 재시도 · 캐시) + Gemini 어댑터
+│   └─ summary.js          요약 파이프라인 (map-reduce, 수준별 모델)
+├─ content/
+│   ├─ core.js             공유 상태 · 설정 · 유틸
+│   ├─ panel.js            스크립트 패널 (목록/문단/요약 탭 · 설정 · 캐시 관리)
+│   ├─ overlay.js          영상 위 자막 (교체/병기, rAF 동기화)
+│   └─ main.js             컨트롤러 — 메시지 라우팅 · 재생 동기화 · SPA 대응
+├─ popup.html · popup.js   액션 팝업 (전체 on/off)
+└─ server/
+    └─ translate-server.js  Claude CLI 번역 서버 (Node 내장 모듈만 사용)
+```
 
-- timedtext 기본 fmt·URL 파라미터·서명 만료 정책 (폴백 A 재fetch 시)
-- ASR 자막의 `aAppend` 동작 — 텍스트 누락 관찰 시 병합 로직 보강
-- 오버레이 z-index(36)와 컨트롤바 상승 오프셋(76px) — 유튜브 z-index 체계 실측
-- 극장/미니플레이어별 오버레이 위치 미세조정
+## 구현 노트
 
-## 자동화 테스트 요약
+- **청크 전략** — Claude 경로는 120세그먼트씩, 첫 청크만 20세그먼트로 작게 잘라 영상 초반이 가장 먼저 표시된다. Gemini 경로는 출력 토큰 한도가 커서 600세그먼트씩 크게 보내 무료 티어의 일일 호출 수를 아낀다. 두 경로 모두 병렬 2.
+- **실패 격리** — 청크 하나가 실패해도 성공분은 유지되고, 누락된 세그먼트만 자동 재시도한다.
+- **무료 티어 보호(Gemini)** — 호출 간 최소 간격을 지켜 429를 예방하고, 출력 한도에 걸리면 청크를 자동으로 반씩 쪼개 재시도한다. 일일 무료 사용량 소진(RPD)은 분당 제한과 구분해 화면에 안내한다.
+- **서비스 워커 수명** — MV3의 30초 idle 종료에 대비해 번역 중 25초 간격 keepalive로 워커를 유지한다.
 
-파서(json3/vtt/XML 감지), 번역 파이프라인(청크·백오프·429·격리·캐시·부분 재개·누락 id 재시도),
-Gemini 요청 형식, localhost 서버(계약·오류 코드), 오버레이(교체/병기·§6.2/6.3/6.7/6.8),
-설정 UI(경로 전환·즉시 반영·재번역 트리거), 팝업 연동(on/off), M7(SPA·극장·전체화면·트랙 전환) — 전부 통과.
+## 개인정보
+
+추적·분석·개발자 서버가 전혀 없다. 설정과 캐시는 브라우저 로컬(chrome.storage)에만 저장되고, 자막 텍스트는 사용자가 직접 고른 엔진(본인 로컬 서버 또는 Gemini API)으로만 전송된다. 전문: [PRIVACY.md](PRIVACY.md)
+
+## 문서
+
+| 문서 | 내용 |
+|---|---|
+| [server/README.md](server/README.md) | 번역 서버 상세 — 환경변수, API 계약, 문제 해결 |
+| [server/SETUP-WINDOWS.md](server/SETUP-WINDOWS.md) | Windows 처음 설치 가이드 |
+| [docs/CHROME-WEBSTORE-GUIDE.md](docs/CHROME-WEBSTORE-GUIDE.md) | 크롬 웹스토어 등록 가이드 |
+| [PRIVACY.md](PRIVACY.md) | 개인정보처리방침 (영문) |
