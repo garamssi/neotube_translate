@@ -67,8 +67,9 @@ const YTX = {
   CHUNK_LOCALHOST: { SEGMENTS: 120, CHARS: 15000, FIRST: 20, PARALLEL: 2 },
   // Gemini 경로: 입력 1M/출력 65K 토큰(공식 확인). 번역의 병목은 "출력"이며
   // 세그당 ~40토큰 → 600세그 출력 ≈ 2.4만 토큰(한도의 ~37%)로 안전.
-  // 출력이 한도에 걸리면(MAX_TOKENS) 청크 자동 이분할로 방어(bg/translation.js).
-  CHUNK_GEMINI: { SEGMENTS: 600, CHARS: 60000, FIRST: 20, PARALLEL: 2 },
+  // FIRST(첫 청크 소형화) 없음 — 무료 티어 RPD(일일 호출 수) 절약이 첫 화면
+  // 속도보다 우선이라는 판단. 출력 한도 도달(MAX_TOKENS) 시 자동 이분할로 방어.
+  CHUNK_GEMINI: { SEGMENTS: 600, CHARS: 60000, PARALLEL: 2 },
   RETRY_BACKOFF_MS: [1000, 4000], // 지수 백오프 2회
   // 설계서 §6의 20s에서 상향: 대형 청크 + Sonnet 지연 대응.
   // SW 30s fetch 수명 규칙은 keepalive(25s 간격 API 호출)로 워커를 유지해 대응.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "YouTube AI 번역",
-  "description": "유튜브 자막을 AI로 번역해 스크립트 패널과 영상 오버레이로 표시.",
+  "name": "YouTube AI Subtitle Translator",
+  "description": "Translate YouTube captions with AI: transcript panel, on-video subtitle overlay, and AI video summaries.",
   "version": "0.1.1",
   "minimum_chrome_version": "111",
   "permissions": ["storage", "webRequest"],
@@ -17,7 +17,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "YouTube AI 번역",
+    "default_title": "YouTube AI Subtitle Translator",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
