@@ -38,6 +38,11 @@
 }
 .ytx-panel *, .ytx-panel *::before, .ytx-panel *::after { box-sizing: border-box; }
 
+/* 패널 총 높이 고정 — 뷰 전환(스크립트↔설정↔캐시↔디버그) 시 높이 출렁임 방지.
+ * 일반 화면(헤더+툴바+본문 430+푸터) 기준 총합. 툴바/푸터가 숨는 화면에서는
+ * 본문(flex:1)이 그만큼 늘어나 총 높이가 항상 동일하다. 접힘 시에만 auto. */
+.ytx-panel:not(.ytx-collapsed) { height: 550px; }
+
 /* M7: 극장/전체화면 모드에서 패널 숨김 (설계서 §5, 1차 범위) */
 .ytx-panel.ytx-hidden { display: none; }
 
@@ -54,9 +59,9 @@
 .ytx-panel.ytx-collapsed .ytx-header { border-bottom: none; }
 
 .ytx-header-icon { flex-shrink: 0; display: block; fill: none; stroke: var(--ytx-accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.ytx-title { font-size: 15px; font-weight: 700; }
+.ytx-title { font-size: 14px; font-weight: 700; }
 .ytx-lang-chip {
-  font-size: 12px; font-weight: 500; color: var(--ytx-text2);
+  font-size: 11px; font-weight: 500; color: var(--ytx-text2);
   border: 1px solid var(--ytx-border); border-radius: 10px; padding: 2px 8px;
 }
 .ytx-header-spacer { flex: 1; }
@@ -84,14 +89,14 @@
 .ytx-seg-group { display: flex; border: 1px solid var(--ytx-border); border-radius: 8px; overflow: hidden; }
 .ytx-seg-btn {
   background: transparent; color: var(--ytx-text2); border: none;
-  padding: 5px 12px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit;
+  padding: 5px 12px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit;
 }
 .ytx-seg-btn.ytx-on { background: var(--ytx-chip-hover); color: var(--ytx-text); font-weight: 600; }
 
 /* 토글 칩 (원문 병기 / 자동 스크롤 / 오버레이) */
 .ytx-chip-btn {
   background: var(--ytx-chip); color: var(--ytx-text2); border: 1px solid var(--ytx-border);
-  border-radius: 14px; padding: 4px 11px; font-size: 13px; font-weight: 500;
+  border-radius: 14px; padding: 4px 11px; font-size: 12px; font-weight: 500;
   cursor: pointer; font-family: inherit;
 }
 .ytx-chip-btn.ytx-on {
@@ -105,8 +110,10 @@
 /* ── 본문 ──────────────────────────────────────────────────── */
 .ytx-body {
   position: relative;
-  /* 목업의 430px에서 상향: 뷰포트에 맞춰 확장 (최소 500px 보장, 큰 화면에서 최대 760px) */
-  height: clamp(500px, 62vh, 760px);
+  /* 고정 430px 대신 flex 채움 — 패널 총 높이(550px)가 고정이므로
+   * 일반 화면에서는 ≈430px(목업 치수), 툴바/푸터 없는 화면에서는 그만큼 확장 */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 .ytx-panel.ytx-collapsed .ytx-toolbar,
@@ -119,8 +126,8 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 24px; text-align: center;
 }
-.ytx-empty-title { font-size: 15px; font-weight: 700; }
-.ytx-empty-desc { font-size: 13.5px; color: var(--ytx-text2); line-height: 1.5; }
+.ytx-empty-title { font-size: 14px; font-weight: 700; }
+.ytx-empty-desc { font-size: 12.5px; color: var(--ytx-text2); line-height: 1.5; }
 
 /* ── 목록 모드 행 (목업 row 스타일) ─────────────────────────── */
 .ytx-rows { padding: 6px; }
@@ -131,20 +138,20 @@
 .ytx-row:hover { background: var(--ytx-chip); }
 .ytx-row.ytx-active { background: color-mix(in srgb, var(--ytx-accent) 14%, transparent); }
 .ytx-row-time {
-  font-size: 13px; color: var(--ytx-text2);
+  font-size: 12px; color: var(--ytx-text2);
   font-variant-numeric: tabular-nums; padding-top: 1px;
 }
 .ytx-row.ytx-active .ytx-row-time { color: var(--ytx-accent); font-weight: 700; }
 .ytx-row-main { min-width: 0; }
-.ytx-row-text { font-size: 14.5px; line-height: 1.5; }
-.ytx-row-text.ytx-pending { color: var(--ytx-text2); font-size: 13px; line-height: 1.45; }
-.ytx-row-src { font-size: 13px; line-height: 1.45; color: var(--ytx-text2); margin-top: 2px; }
+.ytx-row-text { font-size: 13.5px; line-height: 1.5; }
+.ytx-row-text.ytx-pending { color: var(--ytx-text2); font-size: 12px; line-height: 1.45; }
+.ytx-row-src { font-size: 12px; line-height: 1.45; color: var(--ytx-text2); margin-top: 2px; }
 
 .ytx-row-sk { margin-top: 6px; }
 
 /* ── 문단 모드 (목업 para 사양) ─────────────────────────────── */
 .ytx-para { padding: 14px 16px; }
-.ytx-para p { margin: 0; font-size: 15px; line-height: 1.9; text-wrap: pretty; }
+.ytx-para p { margin: 0; font-size: 14px; line-height: 1.9; text-wrap: pretty; }
 .ytx-span {
   cursor: pointer; border-radius: 4px; padding: 1px 2px;
   color: var(--ytx-text2);
@@ -173,8 +180,8 @@
 /* ── 번역 진행 헤더 (목업 '번역 중' 상태) ───────────────────── */
 .ytx-progress { padding: 12px 14px; border-bottom: 1px solid var(--ytx-border); position: sticky; top: 0; background: var(--ytx-surface); z-index: 1; }
 .ytx-progress-row { display: flex; align-items: center; gap: 8px; }
-.ytx-progress-label { font-size: 14px; }
-.ytx-progress-route { flex: 1; text-align: right; font-size: 13px; color: var(--ytx-text2); }
+.ytx-progress-label { font-size: 13px; }
+.ytx-progress-route { flex: 1; text-align: right; font-size: 12px; color: var(--ytx-text2); }
 .ytx-progress-track { height: 3px; border-radius: 2px; background: var(--ytx-chip); margin-top: 10px; overflow: hidden; }
 .ytx-progress-fill { height: 100%; background: var(--ytx-accent); transition: width 0.3s; }
 
@@ -205,14 +212,22 @@
 
 .ytx-primary-btn {
   background: var(--ytx-accent); color: var(--ytx-accent-ink); border: none;
-  border-radius: 18px; padding: 8px 18px; font-size: 14px; font-weight: 600;
+  border-radius: 18px; padding: 8px 18px; font-size: 13px; font-weight: 600;
   cursor: pointer; font-family: inherit;
 }
 .ytx-ghost-btn {
   background: none; color: var(--ytx-accent); border: none;
-  border-radius: 18px; padding: 8px 14px; font-size: 14px; font-weight: 600;
+  border-radius: 18px; padding: 8px 14px; font-size: 13px; font-weight: 600;
   cursor: pointer; font-family: inherit;
 }
+/* 아웃라인 칩 버튼 (설정의 캐시 관리 / 디버그 로그 — 목업 사양) */
+.ytx-outline-btn {
+  background: var(--ytx-chip); color: var(--ytx-text); border: 1px solid var(--ytx-border);
+  border-radius: 16px; padding: 7px 15px; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; font-family: inherit; flex-shrink: 0;
+}
+.ytx-outline-btn:hover { background: var(--ytx-chip-hover); }
+.ytx-outline-sm { border-radius: 14px; padding: 5px 12px; font-size: 12px; }
 
 /* ── 인라인 설정 (M6, 목업 설정 화면 사양) ─────────────────── */
 .ytx-panel.ytx-settings-open .ytx-toolbar,
@@ -220,44 +235,53 @@
 .ytx-panel.ytx-settings-open .ytx-resume-btn { display: none; }
 
 .ytx-settings {
-  padding: 16px 16px 12px 16px;
-  display: flex; flex-direction: column; gap: 18px;
+  padding: 16px 16px 14px 16px;
+  display: flex; flex-direction: column; gap: 22px;
 }
 .ytx-field { display: flex; flex-direction: column; gap: 8px; }
-.ytx-field-label { font-size: 13px; font-weight: 700; color: var(--ytx-text2); }
-.ytx-field-hint { font-size: 12.5px; color: var(--ytx-text2); line-height: 1.5; }
-.ytx-field-row { display: flex; align-items: center; justify-content: space-between; }
-.ytx-field-row-label { font-size: 14px; }
+.ytx-field-label { font-size: 12px; font-weight: 700; color: var(--ytx-text2); }
+.ytx-field-label .ytx-label-note { font-weight: 400; }
+.ytx-field-hint { font-size: 11.5px; color: var(--ytx-text2); line-height: 1.5; }
+.ytx-field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ytx-field-row-label { font-size: 13px; line-height: 1.4; }
+.ytx-field-row-sub { font-size: 11.5px; color: var(--ytx-text2); margin-top: 2px; }
+/* 섹션 구분선 (목업: 문제 해결 섹션 상단) */
+.ytx-field-divide { border-top: 1px solid var(--ytx-border); padding-top: 18px; }
 
 .ytx-route-group {
-  display: grid; grid-template-columns: 1fr 1fr;
+  display: grid; grid-template-columns: repeat(3, 1fr);
   border: 1px solid var(--ytx-border); border-radius: 10px; overflow: hidden;
 }
 .ytx-route-btn {
-  background: transparent; color: var(--ytx-text2); border: none;
-  padding: 9px 12px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit;
+  background: transparent; color: var(--ytx-text2); border: none; text-align: center;
+  padding: 9px 8px; font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: inherit;
 }
-.ytx-route-btn.ytx-on { background: var(--ytx-chip-hover); color: var(--ytx-text); font-weight: 600; }
+.ytx-route-btn.ytx-on { background: var(--ytx-chip-hover); color: var(--ytx-text); font-weight: 700; }
 
 .ytx-input {
   background: var(--ytx-chip); border: 1px solid var(--ytx-border); border-radius: 8px;
-  padding: 9px 12px; color: var(--ytx-text); font-size: 14px; font-family: inherit; outline: none;
+  padding: 10px 12px; color: var(--ytx-text); font-size: 13px; font-family: inherit; outline: none;
 }
+.ytx-input.ytx-mono { font-family: 'Roboto Mono', monospace; }
 .ytx-select {
   background: var(--ytx-chip); border: 1px solid var(--ytx-border); border-radius: 8px;
-  padding: 9px 12px; color: var(--ytx-text); font-size: 14px; font-family: inherit; outline: none;
+  padding: 10px 12px; color: var(--ytx-text); font-size: 13px; font-family: inherit; outline: none;
 }
-.ytx-select-sm { padding: 6px 10px; font-size: 13.5px; }
+.ytx-select-sm { padding: 7px 10px; font-size: 12.5px; }
 
+/* 토글 스위치 (목업: 트랙 40×22 r11, knob 18×18 흰색, on=accent) */
 .ytx-toggle {
-  width: 36px; height: 20px; border-radius: 10px; border: none; padding: 2px;
-  background: var(--ytx-chip-hover); cursor: pointer;
+  width: 40px; height: 22px; border-radius: 11px; border: none; padding: 2px;
+  background: var(--ytx-chip-hover); cursor: pointer; flex-shrink: 0;
   display: flex; justify-content: flex-start;
 }
 .ytx-toggle.ytx-on { background: var(--ytx-accent); justify-content: flex-end; }
-.ytx-toggle-knob { width: 16px; height: 16px; border-radius: 50%; background: #ffffff; }
+.ytx-toggle-knob { width: 18px; height: 18px; border-radius: 50%; background: #ffffff; }
 
-.ytx-settings-footer { display: flex; justify-content: flex-end; margin-top: 2px; }
+.ytx-settings-footer { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.ytx-settings-footer .ytx-field-hint { flex: 1; }
+.ytx-settings-footer .ytx-ghost-btn { margin-left: auto; }
+.ytx-primary-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* ── ? 도움말 툴팁 (hover 또는 클릭 토글) ────────────────────── */
 .ytx-help-wrap { position: relative; display: inline-flex; vertical-align: middle; margin-left: 4px; }
@@ -311,12 +335,39 @@
 .ytx-cache-meta { font-size: 12px; color: var(--ytx-text2); margin-top: 1px; }
 .ytx-cache-del { flex-shrink: 0; font-size: 13px; }
 
+/* ── 디버그 로그 뷰 (목업 사양: grid auto/1fr, 모노 12/13px) ── */
+.ytx-dbg-head {
+  padding: 12px 14px; border-bottom: 1px solid var(--ytx-border);
+  display: flex; flex-direction: column; gap: 10px;
+  position: sticky; top: 0; background: var(--ytx-surface); z-index: 1;
+}
+.ytx-dbg-head-row { display: flex; align-items: center; gap: 10px; }
+.ytx-dbg-title { font-size: 15px; font-weight: 700; }
+.ytx-dbg-actions { display: flex; gap: 8px; }
+.ytx-dbg-stats { font-size: 11.5px; color: var(--ytx-text2); font-variant-numeric: tabular-nums; }
+.ytx-dbg-items { padding: 4px 4px 8px; display: flex; flex-direction: column; }
+.ytx-dbg-line {
+  display: grid; grid-template-columns: auto 1fr; gap: 12px;
+  padding: 8px 10px; align-items: baseline; border-radius: 6px;
+}
+.ytx-dbg-line:hover { background: var(--ytx-chip); }
+.ytx-dbg-time {
+  font-family: 'Roboto Mono', monospace; font-size: 12px; color: var(--ytx-text2);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ytx-dbg-msg { font-family: 'Roboto Mono', monospace; font-size: 13px; line-height: 1.5; word-break: break-all; }
+.ytx-dbg-warn .ytx-dbg-msg { color: var(--ytx-danger); } /* 경고/오류 라인 강조 */
+.ytx-dbg-lasterr {
+  font-size: 11.5px; color: var(--ytx-danger);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* ── 요약 뷰 ────────────────────────────────────────────────── */
 .ytx-summary { padding: 12px 16px 16px 16px; display: flex; flex-direction: column; gap: 16px; }
 .ytx-sum-block { display: flex; flex-direction: column; gap: 8px; }
-.ytx-sum-label { font-size: 13px; font-weight: 700; color: var(--ytx-text2); }
+.ytx-sum-label { font-size: 12px; font-weight: 700; color: var(--ytx-text2); }
 .ytx-sum-tldr { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
-.ytx-sum-tldr li { font-size: 14.5px; line-height: 1.6; }
+.ytx-sum-tldr li { font-size: 13.5px; line-height: 1.6; }
 .ytx-sum-section {
   padding: 8px 10px; border-radius: 8px; cursor: pointer;
   border: 1px solid transparent;
@@ -327,15 +378,15 @@
   font-size: 12.5px; font-weight: 600; color: var(--ytx-accent);
   font-variant-numeric: tabular-nums; flex-shrink: 0;
 }
-.ytx-sum-title { font-size: 14.5px; font-weight: 600; line-height: 1.4; }
-.ytx-sum-text { font-size: 13.5px; line-height: 1.6; color: var(--ytx-text2); margin-top: 4px; }
+.ytx-sum-title { font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+.ytx-sum-text { font-size: 12.5px; line-height: 1.6; color: var(--ytx-text2); margin-top: 4px; }
 
 /* ── 푸터 ──────────────────────────────────────────────────── */
 .ytx-footer {
   display: flex; align-items: center; gap: 6px;
   padding: 8px 14px;
   border-top: 1px solid var(--ytx-border);
-  font-size: 12.5px; color: var(--ytx-text2);
+  font-size: 11.5px; color: var(--ytx-text2);
 }
 .ytx-status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--ytx-text2); }
 .ytx-status-dot.ytx-accent { background: var(--ytx-accent); }

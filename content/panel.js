@@ -121,8 +121,10 @@ function renderPanelState() {
   if (!panelEl) return;
 
   panelEl.classList.toggle('ytx-collapsed', state.collapsed);
-  panelEl.classList.toggle('ytx-settings-open', state.settingsOpen || state.cacheOpen); // 툴바/푸터 숨김 공용
-  panelEl.querySelector('[data-ytx="gear"]').classList.toggle('ytx-on', state.settingsOpen || state.cacheOpen);
+  // 설정에서 진입하는 하위 뷰(캐시/디버그)도 "설정이 열린 상태"로 취급 — 기어 표시 유지
+  const settingsFamily = state.settingsOpen || state.cacheOpen || state.debugOpen;
+  panelEl.classList.toggle('ytx-settings-open', settingsFamily); // 툴바/푸터 숨김 공용
+  panelEl.querySelector('[data-ytx="gear"]').classList.toggle('ytx-on', settingsFamily);
   panelEl.querySelector('[data-ytx="mode-rows"]').classList.toggle('ytx-on', state.mode === 'rows');
   panelEl.querySelector('[data-ytx="mode-para"]').classList.toggle('ytx-on', state.mode === 'para');
   panelEl.querySelector('[data-ytx="mode-summary"]').classList.toggle('ytx-on', state.mode === 'summary');
@@ -159,6 +161,10 @@ function renderPanelState() {
 function renderBody() {
   const body = panelEl.querySelector('[data-ytx="body"]');
 
+  if (state.debugOpen) {
+    renderDebugView(body); // 디버그 로그 뷰 (설정에서 진입)
+    return;
+  }
   if (state.cacheOpen) {
     renderCacheView(body); // 캐시 관리 전용 뷰 (설정에서 진입)
     return;
@@ -575,11 +581,13 @@ function retryTranslation() {
 
 /* ═══════════════════════════════════════════════════════════
  * 인라인 설정 화면 (M6 — 설계서 §5 결정 + 지시서 §6.6)
- * 각 컨트롤은 변경 즉시 저장·적용, '완료'는 닫기(+필요 시 재번역).
+ * 드래프트 방식: 컨트롤은 초안(settingsDraft)만 수정하고,
+ * '저장'을 눌러야 영속화·적용된다. 취소/기어 재클릭은 변경을 버림.
  * ═══════════════════════════════════════════════════════════ */
 async function toggleSettings() {
-  if (state.cacheOpen) { // 캐시 뷰에서 기어 클릭 → 전부 닫기
+  if (state.cacheOpen || state.debugOpen) { // 하위 뷰(캐시/디버그)에서 기어 클릭 → 전부 닫기
     state.cacheOpen = false;
+    state.debugOpen = false;
     state.settingsOpen = false;
     renderPanelState();
     return;
@@ -587,29 +595,61 @@ async function toggleSettings() {
   if (state.settingsOpen) return closeSettings();
   const s = await loadSettingsRaw();
   state.settingsDraft = { ...s };
-  state.settingsSnapshot = { route: s.route, targetLang: s.targetLang, geminiModel: s.geminiModel, geminiApiKey: s.geminiApiKey, serverAddress: s.serverAddress };
+  state.settingsSnapshot = { ...s }; // 전체 스냅샷 — dirty 판정·저장 시 변경 비교
   state.settingsOpen = true;
   state.collapsed = false;
   renderPanelState();
 }
 
+/** 닫기(취소) — 드래프트 폐기, 아무것도 적용하지 않음 */
 function closeSettings() {
+  state.settingsOpen = false;
+  state.cacheOpen = false;
+  state.debugOpen = false;
+  state.settingsDraft = null;
+  state.settingsSnapshot = null;
+  renderPanelState();
+}
+
+/** '저장' — 드래프트 영속화 + 런타임 적용 + 필요 시 재번역 */
+async function saveAndCloseSettings() {
   const d = state.settingsDraft;
   const snap = state.settingsSnapshot;
+  if (!d) return closeSettings();
+
+  // 저장 완료를 기다린 뒤에 재번역을 트리거해야 bg가 새 설정(모델 등)을 읽는다
+  await saveSettings(d);
+
+  // 런타임 상태 반영
+  state.route = d.route;
+  state.targetLang = d.targetLang;
+  state.autoTranslate = d.autoTranslate;
+  state.overlayOn = d.overlayOn;
+  state.overlayMode = d.overlayMode;
+  state.overlayFontSize = d.overlayFontSize;
+
+  // 오버레이 즉시 반영 (저장 시점에 한 번)
+  syncOverlay();
+  refreshOverlayText();
+  if (overlayEl) overlayEl.dataset.ytxFont = d.overlayFontSize;
+  if (panelEl) panelEl.querySelector('[data-ytx="overlay"]')?.classList.toggle('ytx-on', d.overlayOn);
+
+  // 번역 경로/언어/모델/키/서버가 바뀌었으면 재번역 (캐시 적중 시 즉시 표시)
+  const needRetranslate = snap && state.caption &&
+    ['route', 'targetLang', 'geminiModel', 'geminiApiKey', 'openaiModel', 'openaiApiKey', 'serverAddress']
+      .some((k) => d[k] !== snap[k]);
+  // 수동 대기 중이던 영상에서 자동 번역을 켜고 저장하면 즉시 시작
+  const autoTurnedOn = snap && !snap.autoTranslate && d.autoTranslate;
+
   state.settingsOpen = false;
+  state.cacheOpen = false;
+  state.debugOpen = false;
   state.settingsDraft = null;
   state.settingsSnapshot = null;
   renderPanelState();
 
-  // 번역 경로/언어/모델/키/포트가 바뀌었으면 재번역 (캐시 적중 시 즉시 표시)
-  if (d && snap && state.caption) {
-    const changed = ['route', 'targetLang', 'geminiModel', 'geminiApiKey', 'serverAddress']
-      .some((k) => d[k] !== snap[k]);
-    if (changed) {
-      state.targetLang = d.targetLang;
-      retryTranslation();
-    }
-  }
+  if (needRetranslate) retryTranslation();
+  else if (autoTurnedOn && state.caption && state.transPhase === 'ready') requestTranslation();
 }
 
 /** ? 도움말 아이콘 — hover 또는 클릭 시 툴팁 표시 */
@@ -620,9 +660,16 @@ function helpIconHtml(text) {
 function renderSettings(body) {
   const d = state.settingsDraft || { ...YTX.DEFAULT_SETTINGS };
   const isLocal = d.route === 'localhost';
+  const isOpenai = d.route === 'openai';
 
   const modelOptions = YTX.GEMINI.MODELS
     .map((m) => `<option value="${m}"${m === d.geminiModel ? ' selected' : ''}>${m}</option>`)
+    .join('');
+  const openaiModelOptions = YTX.OPENAI.MODELS
+    .map((m) => `<option value="${m.value}"${m.value === d.openaiModel ? ' selected' : ''}>${m.label}</option>`)
+    .join('');
+  const langOptions = YTX.TARGET_LANGS
+    .map(([v, label]) => `<option value="${v}"${d.targetLang === v ? ' selected' : ''}>${label}</option>`)
     .join('');
 
   body.innerHTML = `
@@ -631,14 +678,24 @@ function renderSettings(body) {
         <div class="ytx-field-label">번역 경로</div>
         <div class="ytx-route-group">
           <button class="ytx-route-btn${isLocal ? ' ytx-on' : ''}" data-ytx="route-local">Claude CLI</button>
-          <button class="ytx-route-btn${!isLocal ? ' ytx-on' : ''}" data-ytx="route-gemini">Gemini API</button>
+          <button class="ytx-route-btn${!isLocal && !isOpenai ? ' ytx-on' : ''}" data-ytx="route-gemini">Gemini API</button>
+          <button class="ytx-route-btn${isOpenai ? ' ytx-on' : ''}" data-ytx="route-openai">OpenAI API</button>
         </div>
       </div>
 
-      ${isLocal ? `
+      ${isOpenai ? `
       <div class="ytx-field">
-        <div class="ytx-field-label">서버 주소 ${helpIconHtml(`확장이 이 주소로 번역을 요청합니다.\nPOST ${YTX.buildServerBase(d.serverAddress)}/translate\n\nlocalhost:8787 또는 192.168.0.10:8787 같은\nhost:port 형식을 입력하세요.`)}</div>
-        <input type="text" class="ytx-input" data-ytx="set-addr" value="${escapeHtml(d.serverAddress)}" placeholder="localhost:8787" spellcheck="false">
+        <div class="ytx-field-label">OpenAI API 키 ${helpIconHtml('키는 이 브라우저의 chrome.storage에만 저장되며\n외부로 전송되지 않습니다.\nOpenAI API는 무료 티어가 없어 결제 등록된 키가 필요합니다.')}</div>
+        <input type="password" class="ytx-input" placeholder="sk-…" data-ytx="set-oakey" value="${escapeHtml(d.openaiApiKey)}">
+      </div>
+      <div class="ytx-field">
+        <div class="ytx-field-label">OpenAI 모델</div>
+        <select class="ytx-select" data-ytx="set-oamodel">${openaiModelOptions}</select>
+      </div>` : isLocal ? `
+      <div class="ytx-field">
+        <div class="ytx-field-label">서버 주소 ${helpIconHtml(`로컬에서 실행 중인 Claude CLI 브리지 서버 주소.\nlocalhost:8787 또는 192.168.0.10:8787 같은\nhost:port 형식을 입력하세요.`)}</div>
+        <input type="text" class="ytx-input ytx-mono" data-ytx="set-addr" value="${escapeHtml(d.serverAddress)}" placeholder="localhost:8787" spellcheck="false">
+        <div class="ytx-field-hint ytx-mono">POST ${YTX.buildServerBase(d.serverAddress)}/translate</div>
       </div>` : `
       <div class="ytx-field">
         <div class="ytx-field-label">Gemini API 키 ${helpIconHtml('키는 이 브라우저의 chrome.storage에만 저장되며\n외부로 전송되지 않습니다.')}</div>
@@ -658,11 +715,7 @@ function renderSettings(body) {
 
       <div class="ytx-field">
         <div class="ytx-field-label">대상 언어</div>
-        <select class="ytx-select" data-ytx="set-lang">
-          <option value="ko"${d.targetLang === 'ko' ? ' selected' : ''}>한국어</option>
-          <option value="en"${d.targetLang === 'en' ? ' selected' : ''}>English</option>
-          <option value="ja"${d.targetLang === 'ja' ? ' selected' : ''}>日本語</option>
-        </select>
+        <select class="ytx-select" data-ytx="set-lang">${langOptions}</select>
       </div>
 
       <div class="ytx-field">
@@ -695,11 +748,12 @@ function renderSettings(body) {
           <div class="ytx-field-row-label">영상에 번역 자막 표시</div>
           <button class="ytx-toggle${d.overlayOn ? ' ytx-on' : ''}" data-ytx="set-overlayon"><div class="ytx-toggle-knob"></div></button>
         </div>
+        ${d.overlayOn ? `
         <div class="ytx-field-row">
           <div class="ytx-field-row-label">표시 방식</div>
           <select class="ytx-select ytx-select-sm" data-ytx="set-overlaymode">
             <option value="replace"${d.overlayMode === 'replace' ? ' selected' : ''}>교체 (번역만)</option>
-            <option value="dual"${d.overlayMode === 'dual' ? ' selected' : ''}>병기 (원문+번역)</option>
+            <option value="dual"${d.overlayMode === 'dual' ? ' selected' : ''}>원문 병기</option>
           </select>
         </div>
         <div class="ytx-field-row">
@@ -709,19 +763,29 @@ function renderSettings(body) {
             <option value="md"${d.overlayFontSize === 'md' ? ' selected' : ''}>중</option>
             <option value="lg"${d.overlayFontSize === 'lg' ? ' selected' : ''}>대</option>
           </select>
-        </div>
+        </div>` : ''}
       </div>
 
       <div class="ytx-field">
-        <div class="ytx-field-label">번역·요약 캐시 (재방문 시 즉시 표시용)</div>
+        <div class="ytx-field-label">번역·요약 캐시 <span class="ytx-label-note">(재방문 시 즉시 표시용)</span></div>
         <div class="ytx-field-row">
-          <div class="ytx-field-row-label" data-ytx="cache-summary">불러오는 중…</div>
-          <button class="ytx-primary-btn ytx-cta-btn" data-ytx="cache-open">캐시 관리</button>
+          <div class="ytx-field-row-label" style="color: var(--ytx-text2);" data-ytx="cache-summary">불러오는 중…</div>
+          <button class="ytx-outline-btn" data-ytx="cache-open">캐시 관리</button>
+        </div>
+      </div>
+
+      <div class="ytx-field ytx-field-divide">
+        <div class="ytx-field-label">문제 해결</div>
+        <div class="ytx-field-row">
+          <div class="ytx-field-row-label">요청·오류 이벤트 기록<div class="ytx-field-row-sub">이 브라우저에만 저장</div></div>
+          <button class="ytx-outline-btn" data-ytx="debug-open">디버그 로그</button>
         </div>
       </div>
 
       <div class="ytx-settings-footer">
-        <button class="ytx-primary-btn" data-ytx="settings-done">완료</button>
+        <div class="ytx-field-hint" data-ytx="dirty-hint" hidden>저장되지 않은 변경이 있습니다</div>
+        <button class="ytx-ghost-btn" data-ytx="settings-cancel">취소</button>
+        <button class="ytx-primary-btn" data-ytx="settings-save" disabled>저장</button>
       </div>
     </div>`;
 
@@ -774,7 +838,7 @@ async function loadCacheEntries() {
       return {
         key, isSum, size,
         videoId: parts[1], lang: parts[2], route: parts[3],
-        model: isSum ? parts[4] : '',
+        model: parts[4] || '', // 번역·요약 모두 모델별 키 (구키는 빈 값)
         level: isSum ? (parts[5] || parts[4]) : '', // 구키(모델 없는 형식) 호환
         title: v.title || parts[1],
         complete: isSum ? true : !!v.complete,
@@ -833,11 +897,14 @@ function renderCacheView(body) {
       const kind = e.isSum
         ? `요약(${levelLabel(e.level)}${e.model && e.model !== e.level ? '·' + e.model : ''})`
         : `번역 ${e.count}개${e.complete ? '' : ' · 부분'}`;
+      const routeName = e.route === 'gemini' ? 'Gemini' : e.route === 'openai' ? 'OpenAI' : 'Claude';
+      // 번역 항목은 모델까지 표기 (모델별 캐시 분리 — 'cli'/구키는 생략)
+      const engine = routeName + (!e.isSum && e.model && e.model !== 'cli' ? `·${escapeHtml(e.model)}` : '');
       return `
       <div class="ytx-cache-item">
         <div class="ytx-cache-info">
           <div class="ytx-cache-title" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
-          <div class="ytx-cache-meta">${kind} · → ${escapeHtml((e.lang || '?').toUpperCase())} · ${e.route === 'gemini' ? 'Gemini' : 'Claude'} · ${fmtBytes(e.size)} · ${fmtCacheDate(e.cachedAt)}</div>
+          <div class="ytx-cache-meta">${kind} · → ${escapeHtml((e.lang || '?').toUpperCase())} · ${engine} · ${fmtBytes(e.size)} · ${fmtCacheDate(e.cachedAt)}</div>
         </div>
         <button class="ytx-icon-btn ytx-cache-del" data-key="${escapeHtml(e.key)}" title="이 캐시 삭제">✕</button>
       </div>`;
@@ -887,22 +954,163 @@ function renderCacheView(body) {
   });
 }
 
-function bindSettingsEvents(body) {
-  /* 변경 즉시 저장·적용 */
-  const apply = (patch, rerender) => {
-    Object.assign(state.settingsDraft, patch);
-    saveSettings(patch);
-    if (rerender) renderSettings(body);
+/* ═══════════════════════════════════════════════════════════
+ * 디버그 로그 뷰 — 패널 본문 전체 사용 (설정 → 문제 해결에서 진입)
+ * bg의 DBG 버퍼(요청/성공/실패/재시도/429 통계 + 이벤트 200개)를
+ * 1.5초 간격으로 당겨와 표시. '복사'로 전체 로그를 클립보드에.
+ * ═══════════════════════════════════════════════════════════ */
+let debugTimer = null;
+
+function fmtDebugTime(ms) {
+  const d = new Date(ms);
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+function debugLogAsText(data) {
+  const s = data.stats || {};
+  const lines = [
+    '=== YouTube AI Subtitle Translator 디버그 로그 ===',
+    `내보낸 시각: ${new Date().toLocaleString()}`,
+    `통계: 요청 ${s.attempts || 0} · 성공 ${s.ok || 0} · 실패 ${s.failed || 0} · 재시도 ${s.retries || 0} · 429 ${s.rateLimited || 0}`,
+    s.lastError ? `마지막 오류: ${s.lastError}` : '마지막 오류: (없음)',
+    '--- 이벤트 (오래된 → 최신) ---',
+    ...(data.entries || []).map((e) => `[${fmtDebugTime(e.t)}]${e.lvl === 'warn' ? ' [경고]' : ''} ${e.msg}`)
+  ];
+  return lines.join('\n');
+}
+
+function renderDebugView(body) {
+  body.innerHTML = `
+    <div class="ytx-dbg-head">
+      <div class="ytx-dbg-head-row">
+        <button class="ytx-icon-btn" data-ytx="dbg-back" title="설정으로">
+          <svg width="20" height="20" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"></path></svg>
+        </button>
+        <div class="ytx-dbg-title">디버그 로그</div>
+        <div class="ytx-header-spacer"></div>
+        <div class="ytx-dbg-actions">
+          <button class="ytx-outline-btn ytx-outline-sm" data-ytx="dbg-copy">로그 복사</button>
+          <button class="ytx-outline-btn ytx-outline-sm" data-ytx="dbg-clear">지우기</button>
+        </div>
+      </div>
+      <div class="ytx-dbg-stats" data-ytx="dbg-stats">요청 0 · 성공 0 · 실패 0 · 재시도 0 · 429 0</div>
+      <div class="ytx-dbg-lasterr" data-ytx="dbg-lasterr" hidden></div>
+    </div>
+    <div class="ytx-dbg-items" data-ytx="dbg-items">
+      <div class="ytx-empty"><div class="ytx-empty-desc">불러오는 중…</div></div>
+    </div>`;
+
+  let latest = { entries: [], stats: {} };
+  let lastRenderedKey = '';
+
+  const fetchAndRender = async () => {
+    const itemsEl = body.querySelector('[data-ytx="dbg-items"]');
+    if (!itemsEl) return; // 뷰가 교체됨 — 타이머가 다음 틱에 자가 정리
+    let resp = null;
+    try { resp = await chrome.runtime.sendMessage({ type: YTX.MSG.DEBUG_GET }); } catch (e) { /* SW 기동 중 */ }
+    if (!resp || !resp.ok) return;
+    latest = resp.data || latest;
+
+    const s = latest.stats || {};
+    const statsEl = body.querySelector('[data-ytx="dbg-stats"]');
+    if (statsEl) statsEl.textContent =
+      `요청 ${s.attempts || 0} · 성공 ${s.ok || 0} · 실패 ${s.failed || 0} · 재시도 ${s.retries || 0} · 429 ${s.rateLimited || 0}`;
+
+    const errEl = body.querySelector('[data-ytx="dbg-lasterr"]');
+    if (errEl) {
+      errEl.hidden = !s.lastError;
+      if (s.lastError) errEl.textContent = `마지막 오류: ${s.lastError}`;
+    }
+
+    // 변경 없으면 리스트 재렌더 생략 (스크롤 위치 보존)
+    const entries = latest.entries || [];
+    const key = `${entries.length}|${entries.length ? entries[entries.length - 1].t : 0}`;
+    if (key === lastRenderedKey) return;
+    lastRenderedKey = key;
+
+    if (entries.length === 0) {
+      itemsEl.innerHTML = '<div class="ytx-empty"><div class="ytx-empty-desc">기록된 이벤트가 없습니다.<br>번역이나 요약을 실행하면 여기에 쌓입니다.</div></div>';
+      return;
+    }
+    // 최신이 위 (문제 확인은 최근 이벤트부터 — 목업 예시 로그와 동일한 정렬)
+    itemsEl.innerHTML = entries.slice().reverse().map((e) => `
+      <div class="ytx-dbg-line${e.lvl === 'warn' ? ' ytx-dbg-warn' : ''}">
+        <div class="ytx-dbg-time">${fmtDebugTime(e.t)}</div>
+        <div class="ytx-dbg-msg">${escapeHtml(e.msg)}</div>
+      </div>`).join('');
   };
 
-  body.querySelector('[data-ytx="route-local"]').addEventListener('click', () => {
-    state.route = 'localhost';
-    apply({ route: 'localhost' }, true);
+  body.querySelector('[data-ytx="dbg-back"]').addEventListener('click', () => {
+    if (debugTimer) { clearInterval(debugTimer); debugTimer = null; }
+    state.debugOpen = false;
+    state.settingsOpen = true;
+    renderPanelState();
   });
-  body.querySelector('[data-ytx="route-gemini"]').addEventListener('click', () => {
-    state.route = 'gemini';
-    apply({ route: 'gemini' }, true);
+
+  body.querySelector('[data-ytx="dbg-copy"]').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const text = debugLogAsText(latest);
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (err) {
+      // 폴백: 임시 textarea + execCommand
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        ta.remove();
+      } catch (err2) { /* 무시 */ }
+    }
+    btn.textContent = ok ? '복사됨 ✓' : '복사 실패';
+    setTimeout(() => { btn.textContent = '로그 복사'; }, 1500);
   });
+
+  body.querySelector('[data-ytx="dbg-clear"]').addEventListener('click', async () => {
+    try { await chrome.runtime.sendMessage({ type: YTX.MSG.DEBUG_CLEAR }); } catch (e) { /* 무시 */ }
+    lastRenderedKey = '';
+    fetchAndRender();
+  });
+
+  // 자동 갱신 — 뷰가 사라지면(다른 렌더로 교체) 스스로 정리
+  if (debugTimer) { clearInterval(debugTimer); debugTimer = null; }
+  debugTimer = setInterval(() => {
+    if (!panelEl || !panelEl.querySelector('[data-ytx="dbg-items"]')) {
+      clearInterval(debugTimer);
+      debugTimer = null;
+      return;
+    }
+    fetchAndRender();
+  }, 1500);
+  fetchAndRender();
+}
+
+function bindSettingsEvents(body) {
+  const saveBtn = body.querySelector('[data-ytx="settings-save"]');
+  const dirtyHint = body.querySelector('[data-ytx="dirty-hint"]');
+
+  /** 드래프트 ↔ 스냅샷 비교 → 저장 버튼 활성화 */
+  const updateDirty = () => {
+    const d = state.settingsDraft;
+    const snap = state.settingsSnapshot;
+    const dirty = !!(d && snap) && Object.keys(d).some((k) => d[k] !== snap[k]);
+    if (saveBtn) saveBtn.disabled = !dirty;
+    if (dirtyHint) dirtyHint.hidden = !dirty;
+  };
+
+  /* 드래프트만 갱신 — 실제 저장·적용은 '저장' 버튼(saveAndCloseSettings)에서 */
+  const apply = (patch, rerender) => {
+    Object.assign(state.settingsDraft, patch);
+    if (rerender) renderSettings(body); // 재렌더 시 bind에서 updateDirty 재실행
+    else updateDirty();
+  };
+  updateDirty();
+
+  body.querySelector('[data-ytx="route-local"]').addEventListener('click', () => apply({ route: 'localhost' }, true));
+  body.querySelector('[data-ytx="route-gemini"]').addEventListener('click', () => apply({ route: 'gemini' }, true));
+  body.querySelector('[data-ytx="route-openai"]').addEventListener('click', () => apply({ route: 'openai' }, true));
 
   body.querySelector('[data-ytx="set-addr"]')?.addEventListener('change', (e) => {
     const addr = e.target.value.trim().replace(/[^\w.:\-/]/g, '') || YTX.DEFAULT_SETTINGS.serverAddress;
@@ -919,21 +1127,24 @@ function bindSettingsEvents(body) {
   body.querySelector('[data-ytx="set-key"]')?.addEventListener('change', (e) => apply({ geminiApiKey: e.target.value.trim() }));
   body.querySelector('[data-ytx="set-model"]')?.addEventListener('change', (e) => apply({ geminiModel: e.target.value }));
   body.querySelector('[data-ytx="set-tier"]')?.addEventListener('change', (e) => apply({ geminiTier: e.target.value }));
+  body.querySelector('[data-ytx="set-oakey"]')?.addEventListener('change', (e) => apply({ openaiApiKey: e.target.value.trim() }));
+  body.querySelector('[data-ytx="set-oamodel"]')?.addEventListener('change', (e) => apply({ openaiModel: e.target.value }));
 
   body.querySelector('[data-ytx="set-autotrans"]').addEventListener('click', (e) => {
     const next = !state.settingsDraft.autoTranslate;
     e.currentTarget.classList.toggle('ytx-on', next);
-    state.autoTranslate = next;
-    apply({ autoTranslate: next });
-    // 수동 대기 중이던 영상에서 자동으로 켜면 즉시 번역 시작
-    if (next && state.caption && state.transPhase === 'ready') {
-      requestTranslation();
-    }
+    apply({ autoTranslate: next }); // 실제 적용(+수동 대기 중이면 번역 시작)은 저장 시
   });
 
   body.querySelector('[data-ytx="cache-open"]').addEventListener('click', () => {
     state.settingsOpen = false;
     state.cacheOpen = true;
+    renderPanelState();
+  });
+
+  body.querySelector('[data-ytx="debug-open"]').addEventListener('click', () => {
+    state.settingsOpen = false;
+    state.debugOpen = true;
     renderPanelState();
   });
 
@@ -945,25 +1156,14 @@ function bindSettingsEvents(body) {
     apply({ defFollow: next });
   });
 
-  // 오버레이 설정은 즉시 화면에 반영 (§6.6)
-  body.querySelector('[data-ytx="set-overlayon"]').addEventListener('click', (e) => {
-    const next = !state.settingsDraft.overlayOn;
-    e.currentTarget.classList.toggle('ytx-on', next);
-    state.overlayOn = next;
-    apply({ overlayOn: next });
-    syncOverlay();
-    panelEl.querySelector('[data-ytx="overlay"]').classList.toggle('ytx-on', next);
+  // 오버레이 설정 — 드래프트만 (실제 오버레이 반영은 저장 시)
+  // on/off 토글은 하위 필드(표시 방식·폰트 크기) 노출이 바뀌므로 재렌더
+  body.querySelector('[data-ytx="set-overlayon"]').addEventListener('click', () => {
+    apply({ overlayOn: !state.settingsDraft.overlayOn }, true);
   });
-  body.querySelector('[data-ytx="set-overlaymode"]').addEventListener('change', (e) => {
-    state.overlayMode = e.target.value;
-    apply({ overlayMode: e.target.value });
-    refreshOverlayText();
-  });
-  body.querySelector('[data-ytx="set-overlayfont"]').addEventListener('change', (e) => {
-    state.overlayFontSize = e.target.value;
-    apply({ overlayFontSize: e.target.value });
-    if (overlayEl) overlayEl.dataset.ytxFont = e.target.value;
-  });
+  body.querySelector('[data-ytx="set-overlaymode"]')?.addEventListener('change', (e) => apply({ overlayMode: e.target.value }));
+  body.querySelector('[data-ytx="set-overlayfont"]')?.addEventListener('change', (e) => apply({ overlayFontSize: e.target.value }));
 
-  body.querySelector('[data-ytx="settings-done"]').addEventListener('click', closeSettings);
+  body.querySelector('[data-ytx="settings-cancel"]').addEventListener('click', closeSettings);
+  body.querySelector('[data-ytx="settings-save"]').addEventListener('click', saveAndCloseSettings);
 }
