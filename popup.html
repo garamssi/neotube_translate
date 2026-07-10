@@ -1,62 +1,144 @@
 <!DOCTYPE html>
 <!--
-  popup.html — 액션 팝업 (설계서 §5 결정: 보조 수단)
-  범위: 전체 on/off 토글 + 현재 번역 경로 요약만. 상세 설정은 패널 인라인.
+  popup.html — 액션 팝업 (디자인 리뉴얼: 확장 팝업 목업 사양)
+  폭 360px · 빠른 확인/전환용. 상세 설정은 인패널 기어(설정 화면).
+  테마: 시스템 prefers-color-scheme 자동 전환 (인패널과 동일 토큰).
 -->
 <html>
 <head>
   <meta charset="utf-8">
   <style>
     :root {
-      --bg: #ffffff; --text: #0f0f0f; --text2: #606060;
-      --chip: #f2f2f2; --chip-hover: #e5e5e5; --border: rgba(0,0,0,0.14);
-      --accent: #065fd4;
+      --bg: #ffffff; --chip: #f2f2f2; --chip-hover: #e5e5e5;
+      --text: #0f0f0f; --text2: #606060; --border: rgba(0, 0, 0, 0.14);
+      --accent: #065fd4; --accent-ink: #ffffff; --danger: #cc2b1d; --ok: #1e8e3e;
+      --accent-soft: rgba(6, 95, 212, 0.12);
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #212121; --text: #f1f1f1; --text2: #aaaaaa;
-        --chip: #303030; --chip-hover: #3f3f3f; --border: rgba(255,255,255,0.16);
-        --accent: #3ea6ff;
+        --bg: #0f0f0f; --chip: #272727; --chip-hover: #3f3f3f;
+        --text: #f1f1f1; --text2: #aaaaaa; --border: rgba(255, 255, 255, 0.16);
+        --accent: #3ea6ff; --accent-ink: #0f0f0f; --danger: #ff6b60; --ok: #2ba640;
+        --accent-soft: rgba(62, 166, 255, 0.14);
       }
     }
+    * { box-sizing: border-box; }
     body {
-      margin: 0; width: 260px; background: var(--bg); color: var(--text);
-      font-family: Roboto, 'Noto Sans KR', sans-serif; font-size: 13px;
+      margin: 0; width: 360px; background: var(--bg); color: var(--text);
+      font-family: Roboto, 'Noto Sans KR', sans-serif;
     }
+    button { font-family: inherit; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ── 헤더 ── */
     .head {
-      display: flex; align-items: center; gap: 8px;
-      padding: 12px 14px; border-bottom: 1px solid var(--border);
-      font-weight: 700; font-size: 14px;
+      display: flex; align-items: center; gap: 11px;
+      padding: 15px 16px; border-bottom: 1px solid var(--border);
     }
-    .head svg { display: block; stroke: var(--accent); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    .row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 14px;
+    .head-tile {
+      width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     }
+    .head-tile svg { display: block; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .head-main { flex: 1; min-width: 0; }
+    .head-title { font-size: 15px; font-weight: 700; line-height: 1.2; }
+    .head-sub { font-size: 11.5px; color: var(--text2); margin-top: 2px; }
+    .head-gear {
+      background: none; border: none; color: var(--text2); cursor: pointer;
+      padding: 5px; border-radius: 7px; display: flex;
+    }
+    .head-gear:hover { background: var(--chip); color: var(--text); }
+    .head-gear svg { display: block; fill: currentColor; }
+
+    /* ── 전체 사용 토글 ── */
+    .enable-row { padding: 15px 16px; display: flex; align-items: center; gap: 12px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text2); flex-shrink: 0; }
+    .status-dot.on { background: var(--ok); }
+    .enable-main { flex: 1; }
+    .enable-title { font-size: 14px; font-weight: 700; }
+    .enable-sub { font-size: 11.5px; color: var(--text2); margin-top: 1px; }
     .toggle {
-      width: 40px; height: 22px; border-radius: 11px; border: none; padding: 2px;
-      background: var(--chip-hover); cursor: pointer; display: flex; justify-content: flex-start;
+      width: 42px; height: 24px; border-radius: 12px; border: none; padding: 2px;
+      background: var(--chip-hover); cursor: pointer; flex-shrink: 0;
+      display: flex; justify-content: flex-start; transition: background 0.15s;
     }
     .toggle.on { background: var(--accent); justify-content: flex-end; }
-    .knob { width: 18px; height: 18px; border-radius: 50%; background: #fff; }
-    .route {
-      padding: 0 14px 12px 14px; color: var(--text2); font-size: 12px; line-height: 1.5;
+    .knob { width: 20px; height: 20px; border-radius: 50%; background: #ffffff; }
+
+    .divider { height: 1px; background: var(--border); margin: 0 16px; }
+
+    /* ── 현재 설정 요약 (읽기 전용) ── */
+    .summary { padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+    .summary-label {
+      font-size: 11px; font-weight: 700; color: var(--text2);
+      text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px;
     }
-    .route b { color: var(--text); font-weight: 600; }
-    .hint { padding: 10px 14px; border-top: 1px solid var(--border); color: var(--text2); font-size: 11.5px; line-height: 1.5; }
+    .sum-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+    .sum-row svg { display: block; fill: none; stroke: var(--text2); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+    .sum-key { flex: 1; font-size: 13px; color: var(--text2); }
+    .sum-val { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    .sum-badge {
+      font-size: 11px; font-weight: 500; color: var(--accent);
+      background: var(--accent-soft); border-radius: 6px; padding: 2px 7px;
+      font-family: 'Roboto Mono', monospace;
+      max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* ── 푸터 ── */
+    .foot {
+      padding: 13px 16px 15px; border-top: 1px solid var(--border); background: var(--chip);
+      font-size: 11.5px; color: var(--text2); line-height: 1.6;
+      text-wrap: pretty; word-break: keep-all;
+    }
+    .foot svg { display: inline-flex; vertical-align: -3px; margin: 0 2px; fill: var(--text2); }
   </style>
 </head>
 <body>
   <div class="head">
-    <svg width="18" height="18" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M7 13h6"></path><path d="M16.5 13H17"></path><path d="M7 16h2.5"></path><path d="M12.5 16H17"></path></svg>
-    AI 번역 스크립트
+    <div class="head-tile">
+      <svg width="20" height="20" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M7 13h6"></path><path d="M16.5 13H17"></path><path d="M7 16h2.5"></path><path d="M12.5 16H17"></path></svg>
+    </div>
+    <div class="head-main">
+      <div class="head-title">AI 번역 스크립트</div>
+      <div class="head-sub">YouTube 자막 AI 번역</div>
+    </div>
+    <button class="head-gear" id="gear" title="패널 설정 열기" aria-label="패널 설정 열기">
+      <svg width="19" height="19" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"></path></svg>
+    </button>
   </div>
-  <div class="row">
-    <div>전체 사용</div>
-    <button class="toggle" id="enabled"><div class="knob"></div></button>
+
+  <div class="enable-row">
+    <div class="status-dot" id="status-dot"></div>
+    <div class="enable-main">
+      <div class="enable-title">확장 프로그램 사용</div>
+      <div class="enable-sub" id="enable-sub">확인 중…</div>
+    </div>
+    <button class="toggle" id="enabled" role="switch" aria-checked="false" aria-label="확장 프로그램 사용"><div class="knob"></div></button>
   </div>
-  <div class="route" id="route">경로 확인 중…</div>
-  <div class="hint">상세 설정은 유튜브 시청 페이지의 패널 헤더 기어(⚙) 아이콘에서 변경할 수 있습니다.</div>
+
+  <div class="divider"></div>
+
+  <div class="summary">
+    <div class="summary-label">현재 설정</div>
+    <div class="sum-row">
+      <svg width="17" height="17" viewBox="0 0 24 24"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h10"></path></svg>
+      <div class="sum-key">번역 경로</div>
+      <div class="sum-val"><span id="route-name">—</span><span class="sum-badge" id="route-badge" hidden></span></div>
+    </div>
+    <div class="sum-row">
+      <svg width="17" height="17" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a15 15 0 010 18 15 15 0 010-18z"></path></svg>
+      <div class="sum-key">대상 언어</div>
+      <div class="sum-val" id="lang">—</div>
+    </div>
+    <div class="sum-row">
+      <svg width="17" height="17" viewBox="0 0 24 24"><path d="M12 7v5l3 2"></path><circle cx="12" cy="12" r="9"></circle></svg>
+      <div class="sum-key">번역 시작</div>
+      <div class="sum-val" id="autostart">—</div>
+    </div>
+  </div>
+
+  <div class="foot">상세 설정은 유튜브 시청 페이지의 패널 헤더 기어<svg width="14" height="14" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"></path></svg>아이콘에서 변경할 수 있어요.</div>
+
   <script src="constants.js"></script>
   <script src="popup.js"></script>
 </body>
