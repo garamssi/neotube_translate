@@ -30,7 +30,8 @@ node translate-server.js 9000       # 포트 지정
 |---|---|---|
 | `PORT` | `8787` | 수신 포트 (확장 설정의 "서버 주소"와 일치시킬 것) |
 | `HOST` | `127.0.0.1` | `0.0.0.0`으로 실행하면 LAN의 다른 기기에서 접근 가능 — 확장 "서버 주소"에 `<이 기기 IP>:8787` 입력 |
-| `CLAUDE_MODEL` | `sonnet` (= Sonnet 5) | `--model`로 전달할 모델 별칭/이름. 빠른 응답이 필요하면 `haiku` (확장 타임아웃 20초 참고) |
+| `CLAUDE_MODEL` | `sonnet` (= Sonnet 5) | `--model`로 전달할 모델 별칭/이름. 더 빠른 응답이 필요하면 `haiku` |
+| `CLAUDE_EFFORT` | `low` | 번역 요청의 `--effort`. 번역은 확장 사고가 불필요해 `low`가 기본 (지연 대폭 감소). `low`\|`medium`\|`high`\|`xhigh`\|`max` |
 | `CLAUDE_BIN` | `claude` | Claude CLI 실행 파일 경로 |
 
 ### "Not logged in" 오류가 날 때 (CLI 로그인/OAuth 사용 기준)
@@ -64,10 +65,10 @@ curl -X POST http://localhost:8787/translate \
 
 ## 동작 방식
 
-1. 확장이 청크(기본 40세그먼트) 단위로 `POST /translate` 요청
-2. 서버가 `claude -p "<번역 지침 + 세그먼트 JSON>"` (argv 전달, 최소 옵션)을 실행 — `CLAUDE_MODEL` 지정 시에만 `--model` 추가
+1. 확장이 청크(기본 60세그먼트, 첫 청크 20) 단위로 `POST /translate` 요청 — 동시 3개 병렬
+2. 서버가 `claude -p "<번역 지침 + 세그먼트 JSON>" --model <모델> --effort low`를 실행
 3. Claude 텍스트 응답에서 JSON 배열(`[{id, text}]`)을 추출(코드펜스 방어)해 계약 형식으로 반환
-4. CLI 호출은 동시 1개로 직렬화 (확장도 청크를 순차 호출)
+4. CLI 호출은 세마포어로 동시 3개까지 병렬 처리 (`CLAUDE_CONCURRENCY`로 조절)
 
 오류 매핑: 레이트리밋 → `429 RATE_LIMITED`(retry_after_ms 5000) · CLI 실패/미로그인/파싱 실패 → `502 UPSTREAM_ERROR` · 요청 형식 오류 → `400 BAD_REQUEST`.
 부분 응답은 유효합니다 — 누락 id는 확장이 자동 재시도합니다.

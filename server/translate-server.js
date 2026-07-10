@@ -22,7 +22,9 @@
  *     PORT          기본 8787
  *     CLAUDE_BIN    기본 'claude'
  *     CLAUDE_MODEL  기본 'sonnet' (= Sonnet 5, CLI 별칭). 빈 값으로 주면 CLI 기본 모델.
- *                   빠른 응답이 필요하면 CLAUDE_MODEL=haiku (확장 타임아웃 20초 참고)
+ *                   더 빠른 응답이 필요하면 CLAUDE_MODEL=haiku
+ *     CLAUDE_EFFORT 번역 요청의 --effort. 기본 'low' (사고 최소화 → 지연 대폭 감소).
+ *                   품질 실험용: low|medium|high|xhigh|max
  *
  * "Not logged in" 오류가 나면:
  *   1) 서버를 실행한 같은 터미널에서 `claude -p "hi"` 가 되는지 확인
@@ -38,6 +40,10 @@ const { spawn, execFileSync } = require('child_process');
 const PORT = parseInt(process.env.PORT || process.argv[2] || '8787', 10);
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'sonnet'; // 기본: Sonnet 5 (CLI 별칭 'sonnet' = 최신 Sonnet)
+// 번역 기본 effort: 'low' — 번역은 기계적 변환이라 확장 사고가 불필요하고,
+// Sonnet 5 기본(effort 미지정) 대비 응답 지연이 크게 줄어든다 (요약 경로는 요청별 지정).
+const CLAUDE_EFFORT = /^(low|medium|high|xhigh|max)$/.test(process.env.CLAUDE_EFFORT || '')
+  ? process.env.CLAUDE_EFFORT : 'low';
 const CLI_TIMEOUT_MS = 180000; // 확장의 요청 타임아웃(180s)과 동일 상한 — 큰 청크(120세그) 생성시간 대비
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -272,7 +278,7 @@ async function handleTranslate(req, res, body) {
 
   let arr;
   try {
-    const stdout = await runClaude(prompt);
+    const stdout = await runClaude(prompt, { effort: CLAUDE_EFFORT });
     arr = parseClaudeOutput(stdout);
   } catch (e) {
     // CLI가 도중에 끊긴 경우: 완성된 항목만 건져 부분 응답으로 반환 (§6 부분 응답 규칙)
@@ -407,7 +413,7 @@ function selfTest() {
 const HOST = process.env.HOST || '127.0.0.1';
 
 server.listen(PORT, HOST, () => {
-  log(`translate-server 시작 — http://${HOST}:${PORT}/translate (엔진: claude -p, 모델: ${CLAUDE_MODEL || 'CLI 기본'})`);
+  log(`translate-server 시작 — http://${HOST}:${PORT}/translate (엔진: claude -p, 모델: ${CLAUDE_MODEL || 'CLI 기본'}, effort: ${CLAUDE_EFFORT})`);
   if (HOST !== '127.0.0.1') log('LAN 모드 — 같은 네트워크의 다른 기기에서 <이 기기 IP>:' + PORT + ' 로 접근 가능');
   selfTest();
 });
