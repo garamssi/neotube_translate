@@ -60,6 +60,7 @@ const state = {
   autoTranslate: false,     // 기본 수동 — '번역' 버튼으로 시작
   settingsOpen: false,
   cacheOpen: false,         // 캐시 관리 전용 뷰 (설정에서 진입)
+  debugOpen: false,         // 디버그 로그 뷰 (설정에서 진입)
   settingsDraft: null,      // 설정 화면에서 편집 중인 값
   settingsSnapshot: null    // 열 때 스냅샷 — 닫을 때 재번역 필요 판단
 };

@@ -52,6 +52,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     case YTX.MSG.SUMMARY_PROGRESS: return onSummaryProgress(msg);
     case YTX.MSG.SUMMARY_COMPLETE: return onSummaryComplete(msg);
     case YTX.MSG.SUMMARY_ERROR: return onSummaryError(msg);
+    case YTX.MSG.OPEN_SETTINGS: // 액션 팝업 기어 → 패널 설정 화면 열기
+      if (panelEl && !state.settingsOpen) toggleSettings();
+      return;
   }
 });
 
@@ -143,9 +146,20 @@ async function applyCachedIfAvailable(caption) {
       return;
     }
 
-    const key = YTX.cacheKey(caption.video_id, s.targetLang, s.route);
+    const key = YTX.cacheKey(caption.video_id, s.targetLang, s.route, YTX.engineModelTag(s));
     const wrap = await chrome.storage.local.get(key);
-    const cached = wrap[key];
+    let cached = wrap[key];
+    let reused = false;
+    // 현재 키에 완전 캐시가 없으면 모델/경로 무관 재사용 (재번역 방지 — 토큰 0)
+    if (!(cached && cached.map && cached.complete)) {
+      try {
+        const all = await chrome.storage.local.get(null);
+        const prefix = YTX.cacheKeyPrefix(caption.video_id, s.targetLang);
+        const alt = Object.entries(all).find(([k, v]) =>
+          k !== key && k.startsWith(prefix) && v && v.map && v.complete);
+        if (alt) { cached = alt[1]; reused = true; }
+      } catch (e) { /* 무시 */ }
+    }
     if (!cached || !cached.map || Object.keys(cached.map).length === 0) return;
 
     // 그 사이 상태가 바뀌었으면(영상 전환·수동 시작 등) 적용하지 않음
@@ -153,7 +167,9 @@ async function applyCachedIfAvailable(caption) {
 
     Object.assign(state.translations, cached.map);
     state.doneSegments = Object.keys(state.translations).length;
-    state.routeLabel = `캐시 (${s.route === 'gemini' ? 'Gemini' : 'Claude CLI'})`;
+    state.routeLabel = reused
+      ? '저장된 번역 재사용'
+      : `캐시 (${s.route === 'gemini' ? 'Gemini' : s.route === 'openai' ? 'OpenAI' : 'Claude CLI'})`;
     state.targetLang = s.targetLang;
     if (cached.complete) {
       state.transPhase = 'done'; // 완전 캐시 → 번역 버튼 불필요
