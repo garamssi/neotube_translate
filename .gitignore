@@ -14,3 +14,9 @@ Thumbs.db
 # 로컬 실험/산출물
 tmp/
 dist/
+
+# 디자인 작업 파일 (구현 완료된 핸드오프 — 로컬 참조용, 저장소 제외)
+docs/design_handoff_youtube_ai_subtitle_translator/
+
+# 개인 초안 (회사 게시판 글 구조안)
+docs/게시글-구조안.md
