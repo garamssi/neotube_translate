@@ -1,8 +1,11 @@
 /**
- * bg/translation.js — 번역 오케스트레이터 + 경로 어댑터 (설계서 §4, §6)
+ * bg/translation.js — 번역 오케스트레이터 + 경로 전략 (설계서 §4, §6)
  *
- * 청크 분할(첫 청크 소형 + 경로별 한도) → 병렬 워커 풀 → 재시도(백오프/429)
+ * 오케스트레이터(공통): 청크 순회 → 병렬 워커 풀 → 재시도(백오프/429)
  * → id 병합 → 완료분 점진 push → chrome.storage.local 캐시.
+ * 경로별 차이는 ROUTES 전략 테이블에 집약:
+ *  - localhost(Claude CLI): 세그먼트 수 기반 청크 + FIRST 소형 첫 청크 (첫 화면 우선)
+ *  - gemini: 글자량 → 예상 출력 토큰 예산 기반 대형 청크 (호출 횟수 최소화)
  */
 'use strict';
 
@@ -102,6 +105,88 @@ function buildChunks(segments, limits) {
   return chunks;
 }
 
+/**
+ * 세그먼트 → 예상 "출력" 토큰 예산 기반 청크 (Gemini 경로)
+ * 호출 횟수(RPM/RPD)가 가장 귀한 자원이므로, 영상의 실제 글자량을 재서
+ * 예산이 찰 때까지 한 요청에 담는다. 추정식·예산은 constants.js CHUNK_GEMINI.
+ * 추정이 빗나가 MAX_TOKENS로 잘리면 OUTPUT_LIMIT 이분할이 안전망.
+ */
+function buildChunksByTokenBudget(segments, cfg, engine) {
+  const estTokens = (seg) => cfg.EST_TOKENS_PER_SEG + Math.ceil(seg.text.length * cfg.EST_TOKENS_PER_CHAR);
+  const chunks = [];
+  let current = [];
+  let budget = 0;
+  let totalChars = 0;
+  let totalEst = 0;
+
+  for (const seg of segments) {
+    const t = estTokens(seg);
+    if (current.length > 0 && budget + t > cfg.OUTPUT_TOKEN_BUDGET) {
+      chunks.push(current);
+      current = [];
+      budget = 0;
+    }
+    current.push(seg);
+    budget += t;
+    totalChars += seg.text.length;
+    totalEst += t;
+  }
+  if (current.length) chunks.push(current);
+  log(`${engine || 'API'} 청크 계획: 원문 ${totalChars.toLocaleString()}자 → 예상 출력 ~${totalEst.toLocaleString()} 토큰 ` +
+    `→ ${chunks.length}개 요청 (예산 ${cfg.OUTPUT_TOKEN_BUDGET.toLocaleString()} 토큰/청크)`);
+  return chunks;
+}
+
+/**
+ * 불완전 JSON 응답 방어 (Gemini/OpenAI 공용): 끝부분만 깨진 대형 응답에서
+ * 완성된 {id, text} 항목만 건져 부분 반환 — 누락 id는 오케스트레이터가 재요청.
+ */
+function salvageIdTextItems(text) {
+  const out = [];
+  const re = /\{\s*"id"\s*:\s*(\d+)\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    try { out.push({ id: Number(m[1]), text: JSON.parse(`"${m[2]}"`) }); } catch (e) { /* 항목 스킵 */ }
+  }
+  return out;
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * 경로 전략 (Strategy) — 경로별 차이를 한 곳에 모은다.
+ * 오케스트레이터(청크 순회·재시도·병합·캐시)는 전략을 통해서만
+ * 경로를 만지므로, 새 엔진 추가 = 이 테이블에 항목 추가.
+ * ═══════════════════════════════════════════════════════════ */
+const ROUTES = {
+  gemini: {
+    label: (settings) => `Gemini(${settings.geminiModel})`,
+    parallel: () => YTX.CHUNK_GEMINI.PARALLEL || 2,
+    /** 시작 전 점검 — 문제가 있으면 {code, message} 반환 */
+    precheck: (settings) => !settings.geminiApiKey
+      ? { code: 'NO_API_KEY', message: 'Gemini API 키가 설정되지 않았습니다. 패널 설정에서 키를 입력하세요.' }
+      : null,
+    // 호출 횟수 최소화: 글자량 → 토큰 추정 기반 대형 청크 (FIRST 소형 청크 없음)
+    buildChunks: (segments) => buildChunksByTokenBudget(segments, YTX.CHUNK_GEMINI, 'Gemini'),
+    translateChunk: (chunk, ctx) => callGemini(chunk, ctx.caption, ctx.settings)
+  },
+  openai: {
+    label: (settings) => `OpenAI(${settings.openaiModel || YTX.OPENAI.DEFAULT_MODEL})`,
+    parallel: () => YTX.CHUNK_OPENAI.PARALLEL || 2,
+    precheck: (settings) => !settings.openaiApiKey
+      ? { code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다. 패널 설정에서 키를 입력하세요.' }
+      : null,
+    buildChunks: (segments) => buildChunksByTokenBudget(segments, YTX.CHUNK_OPENAI, 'OpenAI'),
+    translateChunk: (chunk, ctx) => callOpenAI(chunk, ctx.caption, ctx.settings)
+  },
+  localhost: {
+    label: (settings) => `Claude CLI · ${settings.serverAddress}`,
+    parallel: () => YTX.CHUNK_LOCALHOST.PARALLEL || 2,
+    precheck: () => null,
+    // 로컬 서버는 호출 횟수 제약이 없으므로 첫 청크 소형화(FIRST)로 첫 화면 우선
+    buildChunks: (segments) => buildChunks(segments, YTX.CHUNK_LOCALHOST),
+    translateChunk: (chunk, ctx) => callLocalhost(chunk, ctx.chunkIndex, ctx.totalChunks, ctx.caption, ctx.settings)
+  }
+};
+
 /* ═══════════════════════════════════════════════════════════
  * 오케스트레이터
  * ═══════════════════════════════════════════════════════════ */
@@ -133,9 +218,8 @@ async function runTranslationJobInner(tabId, caption, title) {
 
   const settings = await getSettings();
   const { route, targetLang } = settings;
-  const routeLabel = route === 'gemini'
-    ? `Gemini(${settings.geminiModel})`
-    : `Claude CLI · ${settings.serverAddress}`;
+  const strategy = ROUTES[route] || ROUTES.localhost;
+  const routeLabel = strategy.label(settings);
 
   // 원문이 이미 대상 언어면 번역 생략 (지역 변형 무시: ko-KR ≒ ko)
   const srcBase = (caption.source_lang || '').split('-')[0].toLowerCase();
@@ -157,24 +241,39 @@ async function runTranslationJobInner(tabId, caption, title) {
     return;
   }
 
-  const key = YTX.cacheKey(caption.video_id, targetLang, route);
+  const key = YTX.cacheKey(caption.video_id, targetLang, route, YTX.engineModelTag(settings));
 
   // ── 캐시 확인: 재방문 시 즉시 표시 (설계서 §4) ──
+  // 1) 현재 엔진·모델 키 → 2) 없으면 모델/경로 무관 "완전 번역" 재사용.
+  //    이미 번역이 끝난 영상은 엔진을 바꿔도 재번역하지 않는다 (토큰 절약).
+  //    새 엔진으로 다시 번역하려면 캐시 관리에서 해당 항목 삭제 후 번역.
   const cachedWrap = await chrome.storage.local.get(key);
-  const cached = cachedWrap[key];
+  let cached = cachedWrap[key];
+  let reused = false;
+  if (!(cached && cached.map && cached.complete)) {
+    try {
+      const all = await chrome.storage.local.get(null);
+      const prefix = YTX.cacheKeyPrefix(caption.video_id, targetLang);
+      const alt = Object.entries(all).find(([k, v]) =>
+        k !== key && k.startsWith(prefix) && v && v.map && v.complete);
+      if (alt) { cached = alt[1]; reused = true; }
+    } catch (e) { /* 무시 — 재사용 조회 실패 시 일반 흐름 */ }
+  }
   let translations = {}; // id(string) → 번역 텍스트
 
   if (cached && cached.map) {
     translations = { ...cached.map };
     if (cached.complete) {
-      log(`캐시 적중(완전) — ${key}`);
+      log(reused
+        ? `캐시 재사용(다른 엔진/모델의 완전 번역) — ${caption.video_id}`
+        : `캐시 적중(완전) — ${key}`);
       sendToTab(tabId, {
         type: YTX.MSG.TRANS_COMPLETE,
         videoId: caption.video_id,
         translations,
         failedChunks: [],
         fromCache: true,
-        routeLabel,
+        routeLabel: reused ? '저장된 번역 재사용' : routeLabel,
         targetLang
       });
       return;
@@ -182,23 +281,23 @@ async function runTranslationJobInner(tabId, caption, title) {
     log(`캐시 적중(부분, ${Object.keys(translations).length}개) — 누락분만 번역 진행`);
   }
 
-  // ── Gemini 경로 사전 점검 ──
-  if (route === 'gemini' && !settings.geminiApiKey) {
+  // ── 경로별 사전 점검 (전략) ──
+  const pre = strategy.precheck(settings);
+  if (pre) {
     sendToTab(tabId, {
       type: YTX.MSG.TRANS_CHUNK_ERROR,
       videoId: caption.video_id,
       chunkIndex: -1,
-      code: 'NO_API_KEY',
-      message: 'Gemini API 키가 설정되지 않았습니다. 패널 설정에서 키를 입력하세요.',
+      code: pre.code,
+      message: pre.message,
       routeLabel
     });
     return;
   }
 
-  // 미번역 세그먼트만 청크 대상으로 (경로별 청크 한도)
-  const routeConfig = route === 'gemini' ? YTX.CHUNK_GEMINI : YTX.CHUNK_LOCALHOST;
+  // 미번역 세그먼트만 청크 대상으로 (분할 방식은 경로 전략이 결정)
   const pending = caption.segments.filter((s) => translations[s.id] == null);
-  const chunks = buildChunks(pending, routeConfig);
+  const chunks = strategy.buildChunks(pending);
   const totalSegs = caption.segments.length;
 
   sendToTab(tabId, {
@@ -224,7 +323,7 @@ async function runTranslationJobInner(tabId, caption, title) {
   async function processChunk(i) {
     const chunk = chunks[i];
     try {
-      const result = await translateChunkWithRetry(chunk, i, chunks.length, caption, settings, alive);
+      const result = await translateChunkWithRetry(strategy, chunk, i, chunks.length, caption, settings, alive);
 
       // ── id 병합: 요청에 없던 id 무시 (설계서 §4) ──
       const requested = new Set(chunk.map((s) => String(s.id)));
@@ -240,7 +339,7 @@ async function runTranslationJobInner(tabId, caption, title) {
       if (missing.length > 0 && alive()) {
         log(`청크 ${i}: 누락 id ${missing.length}개 재시도`);
         try {
-          const retryResult = await translateChunkWithRetry(missing, i, chunks.length, caption, settings, alive);
+          const retryResult = await translateChunkWithRetry(strategy, missing, i, chunks.length, caption, settings, alive);
           for (const item of retryResult) {
             if (item && requested.has(String(item.id)) && typeof item.text === 'string') {
               merged[String(item.id)] = item.text;
@@ -284,7 +383,7 @@ async function runTranslationJobInner(tabId, caption, title) {
     }
   }
 
-  const workerCount = Math.min(routeConfig.PARALLEL || 2, chunks.length);
+  const workerCount = Math.min(strategy.parallel(), chunks.length);
   const workers = Array.from({ length: workerCount }, () => (async () => {
     for (;;) {
       if (!alive() || fatal) return;
@@ -420,10 +519,21 @@ async function geminiGenerate(settings, opts) {
     }
 
     const data = await res.json();
+    // 프롬프트 자체가 차단된 경우 (candidates 없음)
+    if (data?.promptFeedback?.blockReason) {
+      throw transError('BLOCKED', `Gemini가 요청을 차단 (${data.promptFeedback.blockReason})`);
+    }
     const cand = data?.candidates?.[0];
+    const finish = cand?.finishReason;
     // 출력 토큰 한도 도달 → JSON이 잘려 있음. 호출부가 청크를 쪼개 재시도하도록 별도 코드
-    if (cand?.finishReason === 'MAX_TOKENS') {
+    if (finish === 'MAX_TOKENS') {
       throw transError('OUTPUT_LIMIT', '출력 토큰 한도 도달 — 청크 분할 필요');
+    }
+    // RECITATION(원문 재현 감지)·SAFETY 등으로 생성이 중단된 경우:
+    // 같은 내용을 통째로 재시도해도 같은 이유로 끊긴다 → 청크를 쪼개면
+    // 감지 문맥이 달라져 통과하는 경우가 많으므로 OUTPUT_LIMIT처럼 이분할로 처리
+    if (finish && finish !== 'STOP') {
+      throw transError('OUTPUT_LIMIT', `생성 중단 (${finish}) — 청크 분할로 재시도`);
     }
     return cand?.content?.parts?.map((p) => p.text || '').join('') || '';
   };
@@ -458,10 +568,8 @@ async function waitForCooldown(alive) {
  * - RATE_LIMITED(429): Retry-After / retry_after_ms 존중 (별도 카운트, 최대 3회, 60s 캡)
  *   + 전 워커 공유 쿨다운
  */
-async function translateChunkWithRetry(chunk, chunkIndex, totalChunks, caption, settings, alive) {
-  const callOnce = () => settings.route === 'gemini'
-    ? callGemini(chunk, caption, settings)
-    : callLocalhost(chunk, chunkIndex, totalChunks, caption, settings);
+async function translateChunkWithRetry(strategy, chunk, chunkIndex, totalChunks, caption, settings, alive) {
+  const callOnce = () => strategy.translateChunk(chunk, { chunkIndex, totalChunks, caption, settings });
 
   let backoffTries = 0;
   let rateLimitTries = 0;
@@ -470,20 +578,24 @@ async function translateChunkWithRetry(chunk, chunkIndex, totalChunks, caption, 
     if (!alive()) throw transError('CANCELLED', '작업 취소됨');
     await waitForCooldown(alive); // 다른 워커가 429를 받았다면 함께 대기
     try {
-      return await callOnce();
+      DBG.count('attempts');
+      const out = await callOnce();
+      DBG.count('ok');
+      return out;
     } catch (e) {
       // 출력 한도 도달(대형 청크의 유일한 실패 모드) → 이분할 재귀로 자동 복구
       if (e.code === 'OUTPUT_LIMIT' && chunk.length >= 2) {
         const mid = Math.ceil(chunk.length / 2);
         log(`청크 ${chunkIndex}: 출력 한도 도달 — ${chunk.length}세그를 ${mid}+${chunk.length - mid}로 분할`);
-        const left = await translateChunkWithRetry(chunk.slice(0, mid), chunkIndex, totalChunks, caption, settings, alive);
-        const right = await translateChunkWithRetry(chunk.slice(mid), chunkIndex, totalChunks, caption, settings, alive);
+        const left = await translateChunkWithRetry(strategy, chunk.slice(0, mid), chunkIndex, totalChunks, caption, settings, alive);
+        const right = await translateChunkWithRetry(strategy, chunk.slice(mid), chunkIndex, totalChunks, caption, settings, alive);
         return left.concat(right);
       }
       const err = e.code ? e : transError('UNKNOWN', String(e.message || e), { retriable: true });
 
       if (err.code === 'RATE_LIMITED' && rateLimitTries < 3) {
         rateLimitTries++;
+        DBG.count('rateLimited');
         const wait = Math.min(
           err.retryAfterMs > 0 ? err.retryAfterMs : YTX.RETRY_BACKOFF_MS[Math.min(backoffTries, 1)],
           60000
@@ -496,10 +608,12 @@ async function translateChunkWithRetry(chunk, chunkIndex, totalChunks, caption, 
       if (err.retriable && backoffTries < YTX.RETRY_BACKOFF_MS.length) {
         const wait = YTX.RETRY_BACKOFF_MS[backoffTries];
         backoffTries++;
+        DBG.count('retries');
         log(`재시도 대기 ${wait}ms (${backoffTries}/${YTX.RETRY_BACKOFF_MS.length}) — ${err.code}`);
         await sleep(wait);
         continue;
       }
+      DBG.count('failed', `${err.code}: ${err.message}`);
       throw err;
     }
   }
@@ -558,8 +672,175 @@ async function callGemini(chunk, caption, settings) {
     if (!Array.isArray(arr)) throw new Error('배열 아님');
     return arr;
   } catch (e) {
-    // 구조화 출력 위반 — 재시도 가치 있음
+    const salvaged = salvageIdTextItems(text);
+    if (salvaged.length > 0) {
+      log(`Gemini 응답 JSON 불완전 — 완성 항목 ${salvaged.length}개 salvage, 누락분은 재요청`);
+      return salvaged;
+    }
+    // 건질 것도 없으면 계약 위반 — 재시도 가치 있음
     throw transError('PARSE', `Gemini 응답이 JSON 배열 계약을 위반: ${text.slice(0, 80)}`, { retriable: true });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * OpenAI 공용 요청 빌더 — 번역·요약이 공유하는 단일 진입점
+ *
+ * 규격 (공식 문서 확인, developers.openai.com 2026-07):
+ * - POST /v1/chat/completions · Authorization: Bearer <key>
+ * - 구조화 출력: response_format { type:'json_schema', json_schema:{ name, strict, schema } }
+ *   strict 모드는 "루트=객체, 모든 object에 additionalProperties:false,
+ *   전 필드 required"를 요구 → toOpenAiStrictSchema()가 자동 변환
+ * - reasoning_effort: 모델 세대별 허용값 상이 → 모델 정의(constants)의 값을 쓰고,
+ *   서버가 파라미터를 거부하면(400) 제거 후 1회 폴백
+ * - finish_reason: 'length'(출력 한도)·'content_filter' → OUTPUT_LIMIT (이분할 재시도)
+ * - 429: insufficient_quota(크레딧 소진, 재시도 불가) vs rate limit(RPM/TPM) 구분
+ * ═══════════════════════════════════════════════════════════ */
+const OPENAI_TIMEOUT_MS = 120000;
+
+/** OpenAI strict 스키마 변환 — 모든 object에 required 전체 + additionalProperties:false */
+function toOpenAiStrictSchema(node) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+  const out = { ...node };
+  if (out.type === 'object' && out.properties) {
+    out.properties = {};
+    for (const [k, v] of Object.entries(node.properties)) out.properties[k] = toOpenAiStrictSchema(v);
+    out.required = Object.keys(out.properties);
+    out.additionalProperties = false;
+  }
+  if (out.type === 'array' && out.items) out.items = toOpenAiStrictSchema(node.items);
+  return out;
+}
+
+/**
+ * @param opts { instruction, user, schemaName, schema, timeoutMs? }
+ * @returns 모델 응답 텍스트 (JSON 문자열)
+ */
+async function openaiGenerate(settings, opts) {
+  const model = settings.openaiModel || YTX.OPENAI.DEFAULT_MODEL;
+  const modelDef = YTX.OPENAI.MODELS.find((m) => m.value === model);
+  const timeout = opts.timeoutMs || OPENAI_TIMEOUT_MS;
+
+  const attempt = async (omitEffort) => {
+    const body = {
+      model,
+      messages: [
+        { role: 'system', content: opts.instruction },
+        { role: 'user', content: opts.user }
+      ],
+      max_completion_tokens: YTX.OPENAI.MAX_COMPLETION_TOKENS,
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: opts.schemaName || 'result', strict: true, schema: toOpenAiStrictSchema(opts.schema) }
+      }
+    };
+    if (!omitEffort && modelDef && modelDef.effort) body.reasoning_effort = modelDef.effort;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    let res;
+    try {
+      res = await fetch(YTX.OPENAI.API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.openaiApiKey}` },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') throw transError('TIMEOUT', `OpenAI 응답 시간 초과 (${timeout / 1000}초)`);
+      throw transError('NETWORK', `OpenAI API에 연결할 수 없습니다: ${e.message}`, { retriable: true });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!res.ok) {
+      const status = res.status;
+      let apiErr = null;
+      try { apiErr = (await res.json())?.error || null; } catch (e) { /* 무시 */ }
+      const detail = apiErr?.message || '';
+      const errCode = apiErr?.code || apiErr?.type || '';
+
+      if (status === 429) {
+        // 크레딧/한도 소진(재시도 불가) vs 순간 처리율(RPM/TPM) 구분 — Gemini QUOTA와 동일 취급
+        if (/insufficient_quota|quota/i.test(errCode) || /quota/i.test(detail)) {
+          throw transError('QUOTA',
+            'OpenAI API 크레딧/사용 한도가 소진되었습니다 — platform.openai.com에서 결제·사용량을 확인하세요.');
+        }
+        const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
+        throw transError('RATE_LIMITED', detail || '요청 한도 초과 (RPM/TPM)', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });
+      }
+      if (status === 400) {
+        if (!omitEffort && /reasoning[_.]?effort/i.test(detail)) {
+          throw transError('EFFORT_PARAM', detail); // attempt 루프에서 폴백 처리
+        }
+        throw transError('BAD_REQUEST', detail || '잘못된 요청 (모델명/키 확인)');
+      }
+      if (status === 401 || status === 403) throw transError('AUTH', detail || 'API 키 인증 실패');
+      if (status >= 500) throw transError('UPSTREAM_ERROR', detail || `OpenAI 서버 오류 (${status})`, { retriable: true });
+      throw transError('UNKNOWN', `HTTP ${status}: ${detail}`);
+    }
+
+    const data = await res.json();
+    const choice = data?.choices?.[0];
+    // 구조화 출력의 명시적 거부 응답
+    if (choice?.message?.refusal) {
+      throw transError('BLOCKED', `OpenAI가 요청을 거부: ${String(choice.message.refusal).slice(0, 100)}`);
+    }
+    const finish = choice?.finish_reason;
+    if (finish === 'length') throw transError('OUTPUT_LIMIT', '출력 토큰 한도 도달 — 청크 분할 필요');
+    if (finish === 'content_filter') throw transError('OUTPUT_LIMIT', '생성 중단 (content_filter) — 청크 분할로 재시도');
+    return choice?.message?.content || '';
+  };
+
+  try {
+    return await attempt(false);
+  } catch (e) {
+    if (e.code === 'EFFORT_PARAM') {
+      log('reasoning_effort 미지원 응답 — 파라미터 없이 폴백');
+      return attempt(true);
+    }
+    throw e;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * 경로 3 — OpenAI API 직접 호출
+ * strict 스키마는 루트가 객체여야 하므로 {segments:[...]} 래핑 사용
+ * ═══════════════════════════════════════════════════════════ */
+async function callOpenAI(chunk, caption, settings) {
+  const userPayload = JSON.stringify(chunk.map((s) => ({ id: s.id, text: s.text })));
+
+  const text = await openaiGenerate(settings, {
+    instruction: buildTranslatorPrompt(caption.source_lang, settings.targetLang),
+    user: `Translate these subtitle segments:\n${userPayload}`,
+    schemaName: 'subtitle_translations',
+    schema: {
+      type: 'object',
+      properties: {
+        segments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'integer', description: 'Segment id from the request' },
+              text: { type: 'string', description: 'Translated subtitle text' }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  try {
+    const obj = JSON.parse(text);
+    if (!obj || !Array.isArray(obj.segments)) throw new Error('segments 배열 아님');
+    return obj.segments;
+  } catch (e) {
+    const salvaged = salvageIdTextItems(text);
+    if (salvaged.length > 0) {
+      log(`OpenAI 응답 JSON 불완전 — 완성 항목 ${salvaged.length}개 salvage, 누락분은 재요청`);
+      return salvaged;
+    }
+    throw transError('PARSE', `OpenAI 응답이 JSON 계약을 위반: ${text.slice(0, 80)}`, { retriable: true });
   }
 }
 
