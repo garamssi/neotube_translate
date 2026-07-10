@@ -1,6 +1,6 @@
 # Privacy Policy — YouTube AI Subtitle Translator
 
-_Last updated: July 6, 2026_
+_Last updated: July 10, 2026_
 
 YouTube AI Subtitle Translator ("the extension") is designed to work entirely on your device,
 using translation engines that **you** configure and control.
@@ -16,8 +16,8 @@ using translation engines that **you** configure and control.
 | Data | Where it goes | Why |
 |---|---|---|
 | Extension settings (language, display options, engine choice) | Stored locally in Chrome extension storage (`chrome.storage.local`) | Remember your preferences |
-| Gemini API key (optional, user-provided) | Stored locally in Chrome extension storage; sent **only** to Google's Gemini API (`generativelanguage.googleapis.com`) as an authentication header | Authenticate your own API requests |
-| YouTube caption text of the video you choose to translate | Sent **only** to the translation engine you configured: your own local Claude CLI server (`localhost` or an address you set), or Google's Gemini API | Perform the translation/summary you requested |
+| API keys (optional, user-provided: Gemini and/or OpenAI) | Stored locally in Chrome extension storage; each key is sent **only** to its own provider (`generativelanguage.googleapis.com` / `api.openai.com`) as an authentication header | Authenticate your own API requests |
+| YouTube caption text of the video you choose to translate | Sent **only** to the translation engine you configured: your own local Claude CLI server (`localhost` or an address you set), Google's Gemini API, or OpenAI's API | Perform the translation/summary you requested |
 | Video URL (Gemini summary mode only) | Sent to Google's Gemini API | Let Gemini analyze the public video for summarization |
 | Translation & summary results | Cached locally in Chrome extension storage | Instant display on revisit; you can delete entries anytime in Settings → Cache Manager |
 
@@ -30,7 +30,9 @@ using translation engines that **you** configure and control.
 ## Third-party services
 
 When you configure the Gemini engine, caption text/video URLs are processed by Google under
-[Google's terms and privacy policy](https://policies.google.com/privacy). When you use the
+[Google's terms and privacy policy](https://policies.google.com/privacy). When you configure the
+OpenAI engine, caption text is processed by OpenAI under
+[OpenAI's privacy policy](https://openai.com/policies/privacy-policy). When you use the
 Claude CLI engine, data is processed by your own local server and Anthropic under
 [Anthropic's privacy policy](https://www.anthropic.com/legal/privacy), using your own account.
 
