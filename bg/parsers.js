@@ -2,13 +2,11 @@
  * bg/parsers.js — 자막 파싱 · 정규화 (설계서 §2~§3)
  *
  * 서비스 워커 계층 구조 (importScripts 순서 = 의존 방향):
- *   constants.js → parsers.js(순수 함수) → capture.js(취득) → translation.js(번역)
- *   → background.js(메시지 라우터)
+ *   constants.js → debuglog.js(로거·디버그 버스) → parsers.js(순수 함수)
+ *   → capture.js(취득) → translation.js(번역) → background.js(메시지 라우터)
+ * log()/warn()은 debuglog.js에서 정의된다 (콘솔 + 디버그 버퍼 겸용).
  */
 'use strict';
-
-const log = (...a) => console.log(YTX.LOG, ...a);
-const warn = (...a) => console.warn(YTX.LOG, ...a);
 
 /** timedtext URL에서 메타데이터 추출 */
 function parseTimedtextUrl(url) {

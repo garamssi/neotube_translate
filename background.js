@@ -9,7 +9,7 @@
  *
  * 이 파일은 content script 메시지를 각 모듈로 위임하는 라우팅만 담당한다.
  */
-importScripts('constants.js', 'bg/parsers.js', 'bg/capture.js', 'bg/translation.js', 'bg/summary.js');
+importScripts('constants.js', 'bg/debuglog.js', 'bg/parsers.js', 'bg/capture.js', 'bg/translation.js', 'bg/summary.js');
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !sender.tab) return;
@@ -38,6 +38,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case YTX.MSG.TAB_RESET: // SPA 내비게이션(M7) — 취득 상태·번역 작업 리셋
       resetTabCapture(tabId);
       cancelTabJobs(tabId);
+      break;
+
+    case YTX.MSG.DEBUG_GET: // 패널 디버그 뷰 — 로그/통계 스냅샷
+      DBG.snapshot().then((data) => sendResponse({ ok: true, data }));
+      return true; // 비동기 sendResponse
+
+    case YTX.MSG.DEBUG_CLEAR:
+      DBG.clear();
       break;
 
     default:
