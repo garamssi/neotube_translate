@@ -216,9 +216,24 @@ function parseMapPayload(obj) {
  * 라우트 공용 JSON 호출 + 재시도
  * ═══════════════════════════════════════════════════════════ */
 async function modelJsonCall(settings, instruction, content, schema, exec) {
-  return settings.route === 'gemini'
-    ? geminiJsonCall(settings, instruction, content, schema)
-    : localhostJsonCall(settings, instruction, content, exec);
+  if (settings.route === 'gemini') return geminiJsonCall(settings, instruction, content, schema);
+  if (settings.route === 'openai') return openaiJsonCall(settings, instruction, content, schema);
+  return localhostJsonCall(settings, instruction, content, exec);
+}
+
+/** OpenAI JSON 호출 — 공용 빌더(openaiGenerate, bg/translation.js)에 위임 */
+async function openaiJsonCall(settings, instruction, content, schema) {
+  const text = await openaiGenerate(settings, {
+    instruction,
+    user: content,
+    schemaName: 'video_summary',
+    schema
+  });
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw transError('PARSE', `요약 응답 파싱 실패: ${text.slice(0, 80)}`, { retriable: true });
+  }
 }
 
 /** 재시도: 번역과 동일 정책(백오프 2회 + 429 공유 쿨다운) */
@@ -329,11 +344,22 @@ async function runSummaryJobInner(tabId, payload) {
   const { videoId, title, level, segments, force } = payload;
   const settings = await getSettings();
   const { route, targetLang } = settings;
-  const exec = route === 'gemini' ? null : summaryExecConfig(settings, level); // 수준별 모델·effort
-  const model = route === 'gemini' ? settings.geminiModel : exec.model;
-  const routeLabel = route === 'gemini'
-    ? `Gemini(${model})`
-    : `Claude CLI(${model}) · ${settings.serverAddress}`;
+  // 경로별 실행 정보 — gemini: URL 모드 / openai·localhost: 트랜스크립트(map-reduce) 공유
+  let exec = null; // localhost: 수준별 모델·effort / openai: 로그 표기용
+  let model;
+  let routeLabel;
+  if (route === 'gemini') {
+    model = settings.geminiModel;
+    routeLabel = `Gemini(${model})`;
+  } else if (route === 'openai') {
+    model = settings.openaiModel || YTX.OPENAI.DEFAULT_MODEL;
+    exec = { model, effort: '-' }; // OpenAI는 설정 모델을 그대로 사용 (effort는 모델 정의를 따름)
+    routeLabel = `OpenAI(${model})`;
+  } else {
+    exec = summaryExecConfig(settings, level);
+    model = exec.model;
+    routeLabel = `Claude CLI(${model}) · ${settings.serverAddress}`;
+  }
   const key = YTX.sumKey(videoId, targetLang, route, model, level);
 
   const sendProgress = (done, total) =>
@@ -354,6 +380,13 @@ async function runSummaryJobInner(tabId, payload) {
     });
     return;
   }
+  if (route === 'openai' && !settings.openaiApiKey) {
+    sendToTab(tabId, {
+      type: YTX.MSG.SUMMARY_ERROR, videoId, level,
+      code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다.', routeLabel
+    });
+    return;
+  }
 
   let data;
   try {
@@ -361,20 +394,42 @@ async function runSummaryJobInner(tabId, payload) {
       /* ── Gemini URL 모드: 영상을 직접 분석 (트랜스크립트 전송 불필요) ──
        * 하네스 동일 적용: STRICT 규격 + temperature 0 + 스키마 강제 */
       const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      log(`요약(Gemini URL 모드) — ${videoUrl} [${level}] (${routeLabel})`);
+      /* URL 모드 타임아웃은 영상 길이에 비례 — Gemini가 영상 전체(프레임+오디오)를
+       * 서버에서 처리하므로 긴 영상은 그만큼 기다려 준다.
+       * 영상 초당 1.5초, 최소 180초 · 최대 600초(브라우저/프록시가 초장시간
+       * 무응답 연결을 끊을 수 있어 상한 필요 — 초과 시 자막 폴백이 이어받음) */
+      const durationSec = Array.isArray(segments) && segments.length
+        ? Math.ceil(segments[segments.length - 1].end || 0) : 0;
+      const urlTimeoutMs = Math.min(Math.max(GEMINI_VIDEO_TIMEOUT_MS, durationSec * 1500), 600000);
+      log(`요약(Gemini URL 모드) — ${videoUrl} [${level}] 영상 ${Math.round(durationSec / 60)}분 → 타임아웃 ${Math.round(urlTimeoutMs / 1000)}초 (${routeLabel})`);
       sendProgress(0, 1);
-      const obj = await withSummaryRetry(() => geminiJsonCall(
-        settings,
-        promptVideoUrl(level, targetLang, title),
-        [
-          { fileData: { fileUri: videoUrl } },
-          { text: `Summarize this video titled "${title}".` }
-        ],
-        FINAL_SCHEMA,
-        GEMINI_VIDEO_TIMEOUT_MS
-      ));
-      data = parseSummaryPayload(obj);
-      sendProgress(1, 1);
+      try {
+        const obj = await withSummaryRetry(() => geminiJsonCall(
+          settings,
+          promptVideoUrl(level, targetLang, title),
+          [
+            { fileData: { fileUri: videoUrl } },
+            { text: `Summarize this video titled "${title}".` }
+          ],
+          FINAL_SCHEMA,
+          urlTimeoutMs
+        ));
+        data = parseSummaryPayload(obj);
+        sendProgress(1, 1);
+      } catch (e) {
+        /* ── URL 모드 자동 폴백 ─────────────────────────────────
+         * URL 모드는 Gemini가 영상 전체(프레임+오디오)를 서버에서 처리해야
+         * 해서 긴 영상은 타임아웃이 날 수 있다. 자막은 이미 확보돼 있으므로
+         * 같은 키로 자막 기반 map-reduce로 전환한다.
+         * 키·크레딧 문제(QUOTA/AUTH)는 폴백해도 동일하게 실패 → 그대로 표면화 */
+        const code = e.code || '';
+        if (['QUOTA', 'AUTH'].includes(code) || !Array.isArray(segments) || segments.length === 0) throw e;
+        warn(`URL 모드 요약 실패 [${code}] — 자막 기반 map-reduce로 폴백`);
+        data = await summarizeFromTranscript(
+          videoId, title, level, segments, settings, targetLang,
+          { model: settings.geminiModel, effort: '-' }, sendProgress
+        );
+      }
     } else {
       data = await summarizeFromTranscript(videoId, title, level, segments, settings, targetLang, exec, sendProgress);
     }
@@ -394,7 +449,7 @@ async function runSummaryJobInner(tabId, payload) {
   log(`요약 완료 — TL;DR ${data.tldr.length}줄, 섹션 ${data.sections.length}개`);
 }
 
-/** Claude CLI 경로: 트랜스크립트 기반 (단일 또는 map-reduce). 결과 data 반환 */
+/** 트랜스크립트 기반 요약 — Claude CLI·OpenAI 경로 공유 (단일 또는 map-reduce). 결과 data 반환 */
 async function summarizeFromTranscript(videoId, title, level, segments, settings, targetLang, exec, sendProgress) {
   const transcript = buildTranscript(segments);
 
