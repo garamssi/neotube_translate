@@ -97,20 +97,22 @@ const YTX = {
   // SW 30s fetch 수명 규칙은 keepalive(25s 간격 API 호출)로 워커를 유지해 대응.
   LOCALHOST_TIMEOUT_MS: 180000, // 여유 상한 — 60세그+effort low면 보통 수십 초 내 완료 (Gemini 경로와 동일한 180s)
 
-  // ── Gemini 경로 (공식 문서 확인: ai.google.dev, 2026-06 기준) ──
+  // ── Gemini 경로 (공식 문서 확인: ai.google.dev, 2026-07 기준) ──
   GEMINI: {
     API_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
     // 구조화 출력(responseFormat) 지원 모델만 나열
     // 출처: https://ai.google.dev/gemini-api/docs/models ,
     //       https://ai.google.dev/gemini-api/docs/structured-output (Model support 표)
     MODELS: [
-      'gemini-3.5-flash',      // 기본값 — 안정판, 최고 성능
-      'gemini-3.1-flash-lite', // 안정판, 저비용
+      'gemini-3.6-flash',      // 기본값 — 최신 안정판 (2026-07-21 출시, 3.5 대비 출력 토큰 -17%)
+      'gemini-3.5-flash',      // 안정판
+      'gemini-3.5-flash-lite', // 안정판, 저비용
+      'gemini-3.1-flash-lite',
       'gemini-2.5-flash',
       'gemini-2.5-flash-lite',
       'gemini-2.5-pro'
     ],
-    DEFAULT_MODEL: 'gemini-3.5-flash',
+    DEFAULT_MODEL: 'gemini-3.6-flash',
     // 사전 페이싱: 호출 간 최소 간격(ms) — 429를 맞기 전에 예방.
     // 무료 티어는 flash 계열 RPM이 한 자릿수~십수 회 수준(프로젝트 단위)이라 보수적으로.
     PACING: { free: 6500, paid: 400 }
@@ -142,7 +144,7 @@ const YTX = {
     autoTranslate: false,       // 기본 수동 — 패널의 '번역' 버튼을 눌렀을 때만 번역
     route: 'localhost',         // 'localhost'(Claude CLI 서버, 기본) | 'gemini' | 'openai'
     geminiApiKey: '',
-    geminiModel: 'gemini-3.5-flash',
+    geminiModel: 'gemini-3.6-flash',
     geminiTier: 'free',         // 'free'(사전 페이싱 강함) | 'paid'(Tier 1+)
     openaiApiKey: '',
     openaiModel: 'gpt-5.4-mini',
