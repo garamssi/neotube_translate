@@ -105,12 +105,8 @@ const YTX = {
     //       https://ai.google.dev/gemini-api/docs/structured-output (Model support 표)
     MODELS: [
       'gemini-3.6-flash',      // 기본값 — 최신 안정판 (2026-07-21 출시, 3.5 대비 출력 토큰 -17%)
-      'gemini-3.5-flash',      // 안정판
-      'gemini-3.5-flash-lite', // 안정판, 저비용
-      'gemini-3.1-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-2.5-pro'
+      'gemini-3.5-flash',      // 안정판, 최고 지능
+      'gemini-3.5-flash-lite'  // 안정판, 저비용
     ],
     DEFAULT_MODEL: 'gemini-3.6-flash',
     // 사전 페이싱: 호출 간 최소 간격(ms) — 429를 맞기 전에 예방.
@@ -124,17 +120,16 @@ const YTX = {
   //   모든 object에 additionalProperties:false + 전 필드 required (변환기가 처리)
   // - 아래 모델 전부 최대 출력 128,000 토큰, 구조화 출력 지원 (모델 페이지 확인)
   // - API 무료 티어 없음(결제 필요), Tier 1 = 500 RPM/500K TPM → 사전 페이싱 불필요
-  // - effort: 세대별 허용값이 다름 — 5.4 계열 none(기본)/low/…/xhigh, 5 계열 minimal/….
-  //   번역은 사고 불필요 → 최소값을 명시하고, 400(파라미터 거부) 시 제거 후 1회 폴백.
+  // - effort: 5.6 계열은 none(기본)~max 전 범위 허용.
+  //   번역은 사고 불필요 → 'none'을 명시하고, 400(파라미터 거부) 시 제거 후 1회 폴백.
   OPENAI: {
     API_URL: 'https://api.openai.com/v1/chat/completions',
     MODELS: [
-      { value: 'gpt-5.4-mini', label: 'gpt-5.4-mini (권장)', effort: 'none' },
-      { value: 'gpt-5.4-nano', label: 'gpt-5.4-nano (최저가·최고속)', effort: 'none' },
-      { value: 'gpt-5-mini', label: 'gpt-5-mini (저가)', effort: 'minimal' },
-      { value: 'gpt-5.4', label: 'gpt-5.4 (품질 우선)', effort: 'none' }
+      { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna (권장·저가·고속)', effort: 'none' },
+      { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra (균형)', effort: 'none' },
+      { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol (품질 우선)', effort: 'none' }
     ],
-    DEFAULT_MODEL: 'gpt-5.4-mini',
+    DEFAULT_MODEL: 'gpt-5.6-luna',
     MAX_COMPLETION_TOKENS: 16384 // 과금 보호 상한 — 초과 시 finish_reason=length → 이분할
   },
 
@@ -147,7 +142,7 @@ const YTX = {
     geminiModel: 'gemini-3.6-flash',
     geminiTier: 'free',         // 'free'(사전 페이싱 강함) | 'paid'(Tier 1+)
     openaiApiKey: '',
-    openaiModel: 'gpt-5.4-mini',
+    openaiModel: 'gpt-5.6-luna',
     serverAddress: 'localhost:8787', // Claude CLI 서버 주소 (host:port, LAN 주소 가능)
     targetLang: 'ko',
     summaryLevel: 'standard',   // 요약 수준: 'brief'(짧게) | 'standard'(표준) | 'detailed'(상세)
