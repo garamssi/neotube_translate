@@ -89,7 +89,7 @@ claude -p "hi"    # 짧은 응답이 나오면 인증 완료
 Claude CLI: x.x.x (Claude Code)
 CLI 실행: C:\...\claude.exe  (또는  node ...\cli.js)
 인증: CLI 로그인(OAuth) 사용 예정
-translate-server 시작 — http://127.0.0.1:8787/translate (엔진: claude -p, 모델: sonnet)
+translate-server 시작 — http://127.0.0.1:8787/translate (엔진: claude -p, 모델: sonnet, effort: low)
 인증 자가 테스트 중… (claude 1회 호출)
 자가 테스트 통과 — 번역 요청을 처리할 준비가 되었습니다.
 ```
