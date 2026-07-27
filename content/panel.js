@@ -56,6 +56,8 @@ function buildPanel() {
 function bindPanelEvents(el) {
   el.querySelector('[data-ytx="collapse"]').addEventListener('click', () => {
     state.collapsed = !state.collapsed;
+    state.collapsedSaved = state.collapsed;
+    saveSettings({ panelCollapsed: state.collapsed }); // 명시적 선택만 영속화 — 새 영상/새 세션에서 복원
     renderPanelState();
   });
   el.querySelector('[data-ytx="gear"]').addEventListener('click', () => toggleSettings());
@@ -585,19 +587,13 @@ function retryTranslation() {
  * '저장'을 눌러야 영속화·적용된다. 취소/기어 재클릭은 변경을 버림.
  * ═══════════════════════════════════════════════════════════ */
 async function toggleSettings() {
-  if (state.cacheOpen || state.debugOpen) { // 하위 뷰(캐시/디버그)에서 기어 클릭 → 전부 닫기
-    state.cacheOpen = false;
-    state.debugOpen = false;
-    state.settingsOpen = false;
-    renderPanelState();
-    return;
-  }
+  if (state.cacheOpen || state.debugOpen) return closeSettings(); // 하위 뷰(캐시/디버그)에서 기어 클릭 → 전부 닫기
   if (state.settingsOpen) return closeSettings();
   const s = await loadSettingsRaw();
   state.settingsDraft = { ...s };
   state.settingsSnapshot = { ...s }; // 전체 스냅샷 — dirty 판정·저장 시 변경 비교
   state.settingsOpen = true;
-  state.collapsed = false;
+  state.collapsed = false; // 접혀 있으면 임시 펼침 (저장 안 함 — 닫을 때 collapsedSaved로 복원)
   renderPanelState();
 }
 
@@ -608,6 +604,7 @@ function closeSettings() {
   state.debugOpen = false;
   state.settingsDraft = null;
   state.settingsSnapshot = null;
+  state.collapsed = state.collapsedSaved; // 설정이 임시로 펼쳐 둔 상태 복원 (마지막 쉐브론 선택)
   renderPanelState();
 }
 
@@ -646,6 +643,7 @@ async function saveAndCloseSettings() {
   state.debugOpen = false;
   state.settingsDraft = null;
   state.settingsSnapshot = null;
+  state.collapsed = state.collapsedSaved; // 설정이 임시로 펼쳐 둔 상태 복원 (마지막 쉐브론 선택)
   renderPanelState();
 
   if (needRetranslate) retryTranslation();

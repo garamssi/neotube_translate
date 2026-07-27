@@ -44,6 +44,7 @@ const state = {
 
   // 패널 UI (설계서 §5)
   collapsed: false,
+  collapsedSaved: false, // 저장된 접힘 상태 미러 — 설정 강제 펼침 후 복원 기준
   mode: 'rows',         // 'rows' | 'para' | 'summary'
   bilingual: true,
   follow: true,
@@ -125,6 +126,8 @@ async function loadSettings() {
   const s = await loadSettingsRaw();
   state.mode = s.defMode;
   state.follow = s.defFollow;
+  state.collapsed = s.panelCollapsed;
+  state.collapsedSaved = s.panelCollapsed;
   state.targetLang = s.targetLang;
   state.overlayOn = s.overlayOn;
   state.overlayMode = s.overlayMode;

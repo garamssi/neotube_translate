@@ -149,6 +149,7 @@ const YTX = {
     summaryClaudeModel: 'auto', // 'auto' = 수준별 자동 (짧게=haiku, 표준/상세=sonnet)
     defMode: 'rows',            // 패널 표시 모드 기본값
     defFollow: true,            // 자동 스크롤 기본값
+    panelCollapsed: false,      // 패널 접힘 기억 — 쉐브론 토글의 마지막 선택 (설정의 임시 펼침은 저장 안 함)
     // 오버레이(M5, 지시서 §6.6)
     overlayOn: true,
     overlayMode: 'replace',     // 'replace'(교체) | 'dual'(병기)
