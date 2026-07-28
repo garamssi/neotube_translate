@@ -13,7 +13,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-4285F4" alt="Manifest V3">
   <img src="https://img.shields.io/badge/Chrome-111%2B-34A853" alt="Chrome 111+">
-  <img src="https://img.shields.io/badge/version-1.1.0-333333" alt="v1.1.0">
+  <img src="https://img.shields.io/badge/version-1.1.1-333333" alt="v1.1.1">
 </p>
 
 ## 기능

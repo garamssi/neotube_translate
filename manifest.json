@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube AI Subtitle Translator",
   "description": "Translate YouTube captions with AI: transcript panel, on-video subtitle overlay, and AI video summaries.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "minimum_chrome_version": "111",
   "permissions": ["storage", "webRequest"],
   "host_permissions": ["*://*.youtube.com/*", "http://localhost/*"],
