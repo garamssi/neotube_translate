@@ -13,7 +13,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Manifest-V3-4285F4" alt="Manifest V3">
   <img src="https://img.shields.io/badge/Chrome-111%2B-34A853" alt="Chrome 111+">
-  <img src="https://img.shields.io/badge/version-1.1.1-333333" alt="v1.1.1">
+  <img src="https://img.shields.io/badge/version-1.2.0-333333" alt="v1.2.0">
 </p>
 
 ## 기능
@@ -62,7 +62,7 @@ Service Worker ─ 정규화 → 청크 분할 → 병렬 번역 → 완료분�
 
 **Gemini API.** [Google AI Studio](https://aistudio.google.com/apikey)에서 키를 발급받아 패널 설정(⚙)에서 번역 경로를 Gemini로 바꾸고 키를 입력합니다. 무료 키라면 티어를 "무료"로 두세요 — 분당 호출 제한에 맞춰 요청 간격을 자동으로 조절합니다.
 
-**OpenAI API.** [platform.openai.com](https://platform.openai.com/api-keys)에서 키를 발급받아 번역 경로를 OpenAI로 바꾸고 키를 입력합니다. OpenAI API는 무료 티어가 없어 결제 등록된 키가 필요합니다. 기본 모델은 gpt-5.6-luna이며 설정에서 바꿀 수 있습니다. 요약은 Claude 경로와 같은 자막 기반 방식으로 동작합니다 (OpenAI는 영상 URL 분석을 지원하지 않음).
+**OpenAI API.** [platform.openai.com](https://platform.openai.com/api-keys)에서 키를 발급받아 번역 경로를 OpenAI로 바꾸고 키를 입력합니다. OpenAI API는 무료 티어가 없어 결제 등록된 키가 필요합니다. 기본 모델은 gpt-6-luna이며 설정에서 바꿀 수 있습니다. 요약은 Claude 경로와 같은 자막 기반 방식으로 동작합니다 (OpenAI는 영상 URL 분석을 지원하지 않음).
 
 ## 사용법
 
