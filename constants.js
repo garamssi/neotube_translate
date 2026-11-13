@@ -89,6 +89,7 @@ const YTX = {
     geminiApiKey: '',
     geminiModel: 'gemini-3.8-flash',
     geminiTier: 'free',
+    geminiSummarySource: 'video',
     openaiApiKey: '',
     openaiModel: 'gpt-6-luna',
     serverAddress: 'localhost:8787',

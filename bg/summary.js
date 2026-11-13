@@ -66,20 +66,20 @@ function levelRule(level) {
     case 'brief':
       return (
         'Level: BRIEF — "tldr" with 3-5 bullet points. "sections" must be an empty array.\n' +
-        'Style for BRIEF: ultra-compressed 개조식 (noun-form/–함 endings), each bullet within 40 Korean characters, ' +
-        'conclusions only — no explanations or examples.'
+        'Style for BRIEF: ultra-compressed note style (noun phrases or clipped fragments, no full sentences; in Korean use 개조식 with –함 endings), ' +
+        'each bullet within about 40 characters for CJK languages or 15 words otherwise, conclusions only — no explanations or examples.'
       );
     case 'detailed':
       return (
         'Level: DETAILED — "tldr" with 3-5 bullets, then 8-15 sections covering the full flow.\n' +
-        'Style for DETAILED: tldr stays 개조식; section summaries use complete declarative sentences ("-다" endings), ' +
+        'Style for DETAILED: tldr stays in note style; section summaries use complete declarative sentences (in Korean, plain "-다" endings), ' +
         '2-4 sentences each, including concrete numbers, examples, and takeaways mentioned in the content. ' +
         'Prefer completeness of information over brevity.'
       );
     default:
       return (
         'Level: STANDARD — "tldr" with 3-5 bullets, then 5-10 sections.\n' +
-        'Style for STANDARD: concise 개조식 (noun-form/–함 endings) throughout; each section summary 1-2 sentences, no filler.'
+        'Style for STANDARD: concise note style (noun phrases or clipped fragments; in Korean use 개조식 with –함 endings) throughout; each section summary 1-2 sentences, no filler.'
       );
   }
 }
@@ -106,38 +106,44 @@ const OUTPUT_CONTRACT =
   `4) No emojis, no markdown formatting, no honorifics, no filler phrases. ` +
   `(Sentence style follows the Level rules below.)\n` +
   `5) Section titles: noun phrases within 15 characters.\n` +
-  `6) Keep domain-specific technical terms, product/framework names in English (e.g., Spring, JWT, endpoint).\n` +
+  `6) Keep domain-specific technical terms, product/framework names in their original form (e.g., Spring, JWT, endpoint).\n` +
   `7) JSON safety: NEVER use the double-quote character (") inside any string value — ` +
-  `for quotations use 『 』 instead. Do not use backslashes inside string values.`;
+  `for quotations use single quotes instead. Do not use backslashes inside string values.`;
+
+function languageRule(targetLang) {
+  const tgt = langName(targetLang);
+  return `LANGUAGE: Write every string value in ${tgt}, whatever language the source material is in. ` +
+    `Translate the content into ${tgt}; only the preserved terms from rule 6 stay in their original form.`;
+}
 
 function promptFinal(level, targetLang, title) {
   return (
-    `You are a video content summarizer. Summarize the YouTube video transcript in ${targetLang}. ` +
+    `You are a video content summarizer. Summarize the YouTube video transcript in ${langName(targetLang)}. ` +
     `Video title: "${title}".\n` +
     `Schema (exact key order): {"tldr": ["..."], "sections": [{"start": 0, "title": "...", "summary": "..."}]}\n` +
-    `${levelRule(level)}\n${OUTPUT_CONTRACT}`
+    `${levelRule(level)}\n${OUTPUT_CONTRACT}\n${languageRule(targetLang)}`
   );
 }
 
 /** Gemini URL 모드 — 영상을 직접 시청·분석. 하네스 규칙은 동일 적용 */
 function promptVideoUrl(level, targetLang, title) {
   return (
-    `You are a video content summarizer. Watch the attached YouTube video and summarize it in ${targetLang}. ` +
+    `You are a video content summarizer. Watch the attached YouTube video and summarize it in ${langName(targetLang)}. ` +
     `Video title: "${title}".\n` +
     `Schema (exact key order): {"tldr": ["..."], "sections": [{"start": 0, "title": "...", "summary": "..."}]}\n` +
     `"start" is the integer number of seconds from the beginning of the video where the section begins ` +
     `(derive from the video timeline; never invent).\n` +
-    `${levelRule(level)}\n${OUTPUT_CONTRACT}`
+    `${levelRule(level)}\n${OUTPUT_CONTRACT}\n${languageRule(targetLang)}`
   );
 }
 
 function promptMap(targetLang, title, idx, total, fromT, toT) {
   return (
     `You are summarizing PART ${idx + 1} of ${total} (${fromT}–${toT}) of a video titled "${title}". ` +
-    `Summarize ONLY this part in ${targetLang}.\n` +
+    `Summarize ONLY this part in ${langName(targetLang)}.\n` +
     `Schema (exact key order): {"sections": [{"start": 0, "title": "...", "summary": "..."}], "points": ["..."]}\n` +
     `Exactly 3-6 sections for this part; exactly 3-8 key points capturing important details.\n` +
-    `${OUTPUT_CONTRACT}`
+    `${OUTPUT_CONTRACT}\n${languageRule(targetLang)}`
   );
 }
 
@@ -145,10 +151,10 @@ function promptReduce(level, targetLang, title) {
   return (
     `You are consolidating partial summaries of a long video titled "${title}". ` +
     `The input is a JSON array of parts, each with timestamped sections and key points, in chronological order. ` +
-    `Produce the FINAL summary of the whole video in ${targetLang}.\n` +
+    `Produce the FINAL summary of the whole video in ${langName(targetLang)}.\n` +
     `Schema (exact key order): {"tldr": ["..."], "sections": [{"start": 0, "title": "...", "summary": "..."}]}\n` +
     `Reuse the given section timestamps (merge/select — never invent new ones).\n` +
-    `${levelRule(level)}\n${OUTPUT_CONTRACT}`
+    `${levelRule(level)}\n${OUTPUT_CONTRACT}\n${languageRule(targetLang)}`
   );
 }
 
@@ -348,8 +354,10 @@ async function runSummaryJobInner(tabId, payload) {
   let exec = null; // localhost: 수준별 모델·effort / openai: 로그 표기용
   let model;
   let routeLabel;
+  const fromTranscript = route !== 'gemini' || settings.geminiSummarySource === 'transcript';
   if (route === 'gemini') {
-    model = settings.geminiModel;
+    model = fromTranscript ? `${settings.geminiModel}/자막` : settings.geminiModel;
+    exec = { model: settings.geminiModel, effort: '-' };
     routeLabel = `Gemini(${model})`;
   } else if (route === 'openai') {
     model = settings.openaiModel || YTX.OPENAI.DEFAULT_MODEL;
@@ -388,9 +396,10 @@ async function runSummaryJobInner(tabId, payload) {
     return;
   }
 
+  const startedAt = Date.now();
   let data;
   try {
-    if (route === 'gemini') {
+    if (!fromTranscript) {
       const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
       /* URL 모드 타임아웃은 영상 길이에 비례 — Gemini가 영상 전체(프레임+오디오)를
        * 서버에서 처리하므로 긴 영상은 그만큼 기다려 준다.
@@ -425,7 +434,7 @@ async function runSummaryJobInner(tabId, payload) {
         warn(`URL 모드 요약 실패 [${code}] — 자막 기반 map-reduce로 폴백`);
         data = await summarizeFromTranscript(
           videoId, title, level, segments, settings, targetLang,
-          { model: settings.geminiModel, effort: '-' }, sendProgress
+          exec, sendProgress
         );
       }
     } else {
@@ -444,7 +453,8 @@ async function runSummaryJobInner(tabId, payload) {
   pruneCache();
 
   sendToTab(tabId, { type: YTX.MSG.SUMMARY_COMPLETE, videoId, level, data, routeLabel, fromCache: false });
-  log(`요약 완료 — TL;DR ${data.tldr.length}줄, 섹션 ${data.sections.length}개`);
+  log(`요약 완료 — ${routeLabel} · ${fromTranscript ? '자막 기반' : '영상 분석'} · 소요 ${((Date.now() - startedAt) / 1000).toFixed(1)}초 · ` +
+    `TL;DR ${data.tldr.length}줄, 섹션 ${data.sections.length}개`);
 }
 
 /** 트랜스크립트 기반 요약 — Claude CLI·OpenAI 경로 공유 (단일 또는 map-reduce). 결과 data 반환 */

@@ -26,10 +26,10 @@ function loadExtension({ settings, fetchImpl }) {
       } }
     }
   });
-  for (const f of ['constants.js', 'bg/translation.js']) {
+  for (const f of ['constants.js', 'bg/translation.js', 'bg/summary.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, f), 'utf-8'), ctx, { filename: f });
   }
-  const api = vm.runInContext('({ YTX, parseNumberedLines, runTranslationJob, cancelTabJobs })', ctx);
+  const api = vm.runInContext('({ YTX, parseNumberedLines, runTranslationJob, cancelTabJobs, runSummaryJob })', ctx);
   return { ...api, store, sent };
 }
 
@@ -161,4 +161,29 @@ test('작업: 취소되면 요청을 중단하고 완료분은 캐시에 남는�
   assert.equal(Object.keys(entry.map).length, 20);
   assert.equal(entry.complete, false);
   assert.equal(ext.sent.some((m) => m.type === 'TRANS_COMPLETE'), false);
+});
+
+test('요약: Gemini 자막 기반은 영상 대신 자막을 보내고 대상 언어를 명시한다', async () => {
+  const bodies = [];
+  const summary = { tldr: ['요점'], sections: [{ start: 0, title: '도입', summary: '내용' }] };
+  const ext = loadExtension({
+    settings: { route: 'gemini', geminiApiKey: 'k', geminiTier: 'paid', geminiSummarySource: 'transcript', targetLang: 'ko' },
+    fetchImpl: async (url, init) => {
+      bodies.push(JSON.parse(init.body));
+      return { ok: true, status: 200, headers: { get: () => null },
+        json: async () => ({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(summary) }] } }] }) };
+    }
+  });
+  await ext.runSummaryJob(1, {
+    videoId: 'v5', title: 't', level: 'standard',
+    segments: [{ id: 0, start: 0, end: 2, text: 'Hello there' }]
+  });
+
+  assert.equal(bodies.length, 1);
+  const body = bodies[0];
+  assert.equal(JSON.stringify(body).includes('fileData'), false);
+  assert.match(body.contents[0].parts[0].text, /\[0:00\] Hello there/);
+  assert.match(body.systemInstruction.parts[0].text, /Write every string value in Korean \(ko\)/);
+  assert.ok(ext.store[ext.YTX.sumKey('v5', 'ko', 'gemini', 'gemini-3.8-flash/자막', 'standard')]);
+  assert.equal(ext.sent.find((m) => m.type === 'SUMMARY_COMPLETE').data.tldr[0], '요점');
 });

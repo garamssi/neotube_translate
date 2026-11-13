@@ -709,6 +709,13 @@ function renderSettings(body) {
           <option value="free"${d.geminiTier !== 'paid' ? ' selected' : ''}>무료 (호출 간격 자동 조절)</option>
           <option value="paid"${d.geminiTier === 'paid' ? ' selected' : ''}>유료 Tier 1+ (빠름)</option>
         </select>
+      </div>
+      <div class="ytx-field">
+        <div class="ytx-field-label">요약 방식 ${helpIconHtml('영상 분석: Gemini가 영상 전체를 직접 봅니다. 화면에만 나오는 내용도 반영되지만 느립니다.\n자막 기반: 자막 텍스트만 보냅니다. 빠르지만 자막에 없는 내용은 빠집니다.\n소요 시간은 디버그 로그의 "요약 완료" 줄에 기록됩니다.')}</div>
+        <select class="ytx-select" data-ytx="set-sumsrc">
+          <option value="video"${d.geminiSummarySource !== 'transcript' ? ' selected' : ''}>영상 분석 (화면 내용 포함)</option>
+          <option value="transcript"${d.geminiSummarySource === 'transcript' ? ' selected' : ''}>자막 기반 (빠름)</option>
+        </select>
       </div>`}
 
       <div class="ytx-field">
@@ -1125,6 +1132,7 @@ function bindSettingsEvents(body) {
   body.querySelector('[data-ytx="set-key"]')?.addEventListener('change', (e) => apply({ geminiApiKey: e.target.value.trim() }));
   body.querySelector('[data-ytx="set-model"]')?.addEventListener('change', (e) => apply({ geminiModel: e.target.value }));
   body.querySelector('[data-ytx="set-tier"]')?.addEventListener('change', (e) => apply({ geminiTier: e.target.value }));
+  body.querySelector('[data-ytx="set-sumsrc"]')?.addEventListener('change', (e) => apply({ geminiSummarySource: e.target.value }));
   body.querySelector('[data-ytx="set-oakey"]')?.addEventListener('change', (e) => apply({ openaiApiKey: e.target.value.trim() }));
   body.querySelector('[data-ytx="set-oamodel"]')?.addEventListener('change', (e) => apply({ openaiModel: e.target.value }));
 
