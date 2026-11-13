@@ -27,7 +27,10 @@ function resetTabCapture(tabId) {
   tabState.delete(tabId);
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => tabState.delete(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabState.delete(tabId);
+  cancelTabJobs(tabId);
+});
 
 /* ── 전달 ──────────────────────────────────────────────────── */
 function deliverSegments(tabId, normalized, via) {

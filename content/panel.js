@@ -661,7 +661,7 @@ function renderSettings(body) {
   const isOpenai = d.route === 'openai';
 
   const modelOptions = YTX.GEMINI.MODELS
-    .map((m) => `<option value="${m}"${m === d.geminiModel ? ' selected' : ''}>${m}</option>`)
+    .map((m) => `<option value="${m.value}"${m.value === d.geminiModel ? ' selected' : ''}>${m.label}</option>`)
     .join('');
   const openaiModelOptions = YTX.OPENAI.MODELS
     .map((m) => `<option value="${m.value}"${m.value === d.openaiModel ? ' selected' : ''}>${m.label}</option>`)

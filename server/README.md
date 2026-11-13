@@ -30,10 +30,10 @@ node translate-server.js 9000       # 포트 지정
 |---|---|---|
 | `PORT` | `8787` | 수신 포트 (확장 설정의 "서버 주소"와 일치시킬 것) |
 | `HOST` | `127.0.0.1` | `0.0.0.0`으로 실행하면 LAN의 다른 기기에서 접근 가능 — 확장 "서버 주소"에 `<이 기기 IP>:8787` 입력 |
-| `CLAUDE_MODEL` | `sonnet` (= Sonnet 5) | `--model`로 전달할 모델 별칭/이름. 더 빠른 응답이 필요하면 `haiku` |
+| `CLAUDE_MODEL` | `sonnet` (= Sonnet 5.5) | `--model`로 전달할 모델 별칭/이름. 더 빠른 응답이 필요하면 `haiku` |
 | `CLAUDE_EFFORT` | `low` | 번역 요청의 `--effort`. 번역은 확장 사고가 불필요해 `low`가 기본 (지연 대폭 감소). `low`\|`medium`\|`high`\|`xhigh`\|`max` |
 | `CLAUDE_CONCURRENCY` | `3` | CLI 동시 실행 개수 (세마포어) — 계정 처리율(TPM)에 맞춰 조절 |
-| `CLAUDE_BIN` | `claude` | Claude CLI 실행 파일 경로 |
+| `CLAUDE_BIN` | `claude` | Claude CLI 실행 파일 경로. `.js`/`.mjs` 경로면 `node`로 실행 (Windows npm 설치본의 `cli.js`용 — Node는 `.cmd` 래퍼를 직접 실행하지 못함) |
 
 ### "Not logged in" 오류가 날 때 (CLI 로그인/OAuth 사용 기준)
 
@@ -44,7 +44,8 @@ node translate-server.js 9000       # 포트 지정
    - 다르면: `CLAUDE_BIN=<로그인된 claude 경로> node translate-server.js` 로 실행
    - 예: `CLAUDE_BIN=~/.local/bin/claude node translate-server.js`
 2. 같은 터미널에서 `claude -p "hi"` 가 되는지 확인 — 되면 그 터미널에서 서버를 실행
-3. 서버를 터미널이 아닌 곳(IDE, pm2, launchd 등)에서 돌려야 한다면:
+3. 그 셸에 `ANTHROPIC_API_KEY`가 빈 값/무효 값으로 설정돼 있지 않은지 확인 — 설정돼 있으면 OAuth 로그인 대신 이 키를 우선 사용함
+4. 서버를 터미널이 아닌 곳(IDE, pm2, launchd 등)에서 돌려야 한다면:
    ```bash
    claude setup-token   # 장기 OAuth 토큰 발급 (구독 로그인 기반, API 키 아님)
    CLAUDE_CODE_OAUTH_TOKEN=<발급 토큰> node translate-server.js
@@ -69,9 +70,16 @@ curl -X POST http://localhost:8787/translate \
 **번역 (`POST /translate`)**
 
 1. 확장이 청크(기본 60세그먼트, 첫 청크 20) 단위로 `POST /translate` 요청 — 동시 3개 병렬
-2. 서버가 `claude -p "<번역 지침 + 세그먼트 JSON>" --model <모델> --effort low`를 실행
-3. Claude 텍스트 응답에서 JSON 배열(`[{id, text}]`)을 추출(코드펜스 방어)해 계약 형식으로 반환
+2. 서버가 `claude -p "<번역 지침 + 번호 줄(N|원문)>" --model <모델> --effort low`를 실행 — 세그먼트는 요청 순서대로 1..N 번호를 붙여 한 줄씩 전달
+3. Claude 텍스트 응답의 `N|번역` 줄을 파싱(코드펜스 무시, 중복 번호 제외)해 번호를 원래 id로 되돌려 계약 형식으로 반환
 4. CLI 호출은 세마포어로 동시 3개까지 병렬 처리 (`CLAUDE_CONCURRENCY`로 조절)
+5. 클라이언트가 연결을 끊으면(요청 취소) 실행 중인 CLI를 즉시 종료하고 슬롯을 반환
+
+계약:
+
+- 요청: `{ video_id, source_lang, target_lang, chunk{index,total}, segments[{id,text}] }`
+- 응답: `{ video_id, target_lang, segments[{id,text}] }` — 요청 id의 부분집합 허용
+- 오류: `{ error: { code, message, retry_after_ms? } }`
 
 **요약 (`POST /summarize`)**
 

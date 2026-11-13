@@ -391,8 +391,6 @@ async function runSummaryJobInner(tabId, payload) {
   let data;
   try {
     if (route === 'gemini') {
-      /* ── Gemini URL 모드: 영상을 직접 분석 (트랜스크립트 전송 불필요) ──
-       * 하네스 동일 적용: STRICT 규격 + temperature 0 + 스키마 강제 */
       const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
       /* URL 모드 타임아웃은 영상 길이에 비례 — Gemini가 영상 전체(프레임+오디오)를
        * 서버에서 처리하므로 긴 영상은 그만큼 기다려 준다.
