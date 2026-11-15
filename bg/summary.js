@@ -371,25 +371,25 @@ async function runSummaryJobInner(tabId, payload) {
   const key = YTX.sumKey(videoId, targetLang, route, model, level);
 
   const sendProgress = (done, total) =>
-    sendToTab(tabId, { type: YTX.MSG.SUMMARY_PROGRESS, videoId, level, done, total });
+    sendToTab(tabId, { reqId: payload.reqId, type: YTX.MSG.SUMMARY_PROGRESS, videoId, level, done, total });
 
   // 캐시 확인 (force = '다시 요약')
   const wrap = force ? {} : await chrome.storage.local.get(key);
   if (wrap[key] && wrap[key].data) {
     log(`요약 캐시 적중 — ${key}`);
-    sendToTab(tabId, { type: YTX.MSG.SUMMARY_COMPLETE, videoId, level, data: wrap[key].data, routeLabel, fromCache: true });
+    sendToTab(tabId, { reqId: payload.reqId, type: YTX.MSG.SUMMARY_COMPLETE, videoId, level, data: wrap[key].data, routeLabel, fromCache: true });
     return;
   }
 
   if (route === 'gemini' && !settings.geminiApiKey) {
-    sendToTab(tabId, {
+    sendToTab(tabId, { reqId: payload.reqId,
       type: YTX.MSG.SUMMARY_ERROR, videoId, level,
       code: 'NO_API_KEY', message: 'Gemini API 키가 설정되지 않았습니다.', routeLabel
     });
     return;
   }
   if (route === 'openai' && !settings.openaiApiKey) {
-    sendToTab(tabId, {
+    sendToTab(tabId, { reqId: payload.reqId,
       type: YTX.MSG.SUMMARY_ERROR, videoId, level,
       code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다.', routeLabel
     });
@@ -443,7 +443,7 @@ async function runSummaryJobInner(tabId, payload) {
   } catch (e) {
     const err = e.code ? e : transError('UNKNOWN', String(e.message || e));
     warn(`요약 실패 [${err.code}]: ${err.message}`);
-    sendToTab(tabId, { type: YTX.MSG.SUMMARY_ERROR, videoId, level, code: err.code, message: err.message, routeLabel });
+    sendToTab(tabId, { reqId: payload.reqId, type: YTX.MSG.SUMMARY_ERROR, videoId, level, code: err.code, message: err.message, routeLabel });
     return;
   }
 
@@ -452,7 +452,7 @@ async function runSummaryJobInner(tabId, payload) {
   });
   pruneCache();
 
-  sendToTab(tabId, { type: YTX.MSG.SUMMARY_COMPLETE, videoId, level, data, routeLabel, fromCache: false });
+  sendToTab(tabId, { reqId: payload.reqId, type: YTX.MSG.SUMMARY_COMPLETE, videoId, level, data, routeLabel, fromCache: false });
   log(`요약 완료 — ${routeLabel} · ${fromTranscript ? '자막 기반' : '영상 분석'} · 소요 ${((Date.now() - startedAt) / 1000).toFixed(1)}초 · ` +
     `TL;DR ${data.tldr.length}줄, 섹션 ${data.sections.length}개`);
 }

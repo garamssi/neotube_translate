@@ -185,7 +185,7 @@ const ROUTES = {
     label: (settings) => `Gemini(${settings.geminiModel})`,
     parallel: () => YTX.CHUNK_GEMINI.PARALLEL,
     precheck: (settings) => !settings.geminiApiKey
-      ? { code: 'NO_API_KEY', message: 'Gemini API 키가 설정되지 않았습니다. 패널 설정에서 키를 입력하세요.' }
+      ? { code: 'NO_API_KEY', message: 'Gemini API 키가 설정되지 않았습니다. 툴바의 확장 아이콘을 눌러 설정에서 키를 입력하세요.' }
       : null,
     buildChunks: (segments) => buildChunksByTokenBudget(segments, YTX.CHUNK_GEMINI, 'Gemini'),
     translateChunk: callGemini
@@ -194,7 +194,7 @@ const ROUTES = {
     label: (settings) => `OpenAI(${settings.openaiModel})`,
     parallel: () => YTX.CHUNK_OPENAI.PARALLEL,
     precheck: (settings) => !settings.openaiApiKey
-      ? { code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다. 패널 설정에서 키를 입력하세요.' }
+      ? { code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다. 툴바의 확장 아이콘을 눌러 설정에서 키를 입력하세요.' }
       : null,
     buildChunks: (segments) => buildChunksByTokenBudget(segments, YTX.CHUNK_OPENAI, 'OpenAI'),
     translateChunk: callOpenAI
@@ -239,10 +239,10 @@ async function fetchWithTimeout(url, init, timeoutMs, signal) {
   }
 }
 
-async function runTranslationJob(tabId, caption, title) {
+async function runTranslationJob(tabId, caption, title, reqId) {
   if (!caption || !Array.isArray(caption.segments) || caption.segments.length === 0) return;
   cancelTabJobs(tabId);
-  const job = { controller: new AbortController() };
+  const job = { controller: new AbortController(), reqId };
   activeJobs.set(tabId, job);
   keepaliveAcquire();
   try {
@@ -267,7 +267,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
     const identity = {};
     for (const s of caption.segments) identity[String(s.id)] = s.text;
     log(`번역 생략 — 원문(${caption.source_lang})이 이미 대상 언어(${targetLang})`);
-    sendToTab(tabId, {
+    sendToTab(tabId, { reqId: job.reqId,
       type: YTX.MSG.TRANS_COMPLETE,
       videoId: caption.video_id,
       translations: identity,
@@ -302,7 +302,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
       log(reused
         ? `캐시 재사용(다른 엔진/모델의 완전 번역) — ${caption.video_id}`
         : `캐시 적중(완전) — ${key}`);
-      sendToTab(tabId, {
+      sendToTab(tabId, { reqId: job.reqId,
         type: YTX.MSG.TRANS_COMPLETE,
         videoId: caption.video_id,
         translations,
@@ -318,7 +318,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
 
   const pre = strategy.precheck(settings);
   if (pre) {
-    sendToTab(tabId, {
+    sendToTab(tabId, { reqId: job.reqId,
       type: YTX.MSG.TRANS_CHUNK_ERROR,
       videoId: caption.video_id,
       chunkIndex: -1,
@@ -357,7 +357,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
   const deduped = totalSegs - Object.keys(translations).length - pending.length;
   if (deduped > 0) log(`중복 원문 ${deduped}개는 1회만 전송`);
 
-  sendToTab(tabId, {
+  sendToTab(tabId, { reqId: job.reqId,
     type: YTX.MSG.TRANS_STATUS,
     videoId: caption.video_id,
     totalChunks: chunks.length,
@@ -409,7 +409,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
       saveTranslations(key, merged, caption.segments, title);
 
       if (!alive()) return;
-      sendToTab(tabId, {
+      sendToTab(tabId, { reqId: job.reqId,
         type: YTX.MSG.TRANS_PROGRESS,
         videoId: caption.video_id,
         chunkIndex: i,
@@ -425,7 +425,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
       failedChunks.push({ index: i, ids: chunk.map((s) => s.id), code: err.code, message: err.message });
       warn(`청크 ${i} 최종 실패 [${err.code}]: ${err.message}`);
       if (!alive()) return;
-      sendToTab(tabId, {
+      sendToTab(tabId, { reqId: job.reqId,
         type: YTX.MSG.TRANS_CHUNK_ERROR,
         videoId: caption.video_id,
         chunkIndex: i,
@@ -454,7 +454,7 @@ async function runTranslationJobInner(tabId, caption, title, job) {
   pruneCache();
   if (!alive()) { log('번역 작업 중단 — 완료분은 캐시에 보존'); return; }
 
-  sendToTab(tabId, {
+  sendToTab(tabId, { reqId: job.reqId,
     type: YTX.MSG.TRANS_COMPLETE,
     videoId: caption.video_id,
     translations,

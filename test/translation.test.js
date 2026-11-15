@@ -187,3 +187,138 @@ test('요약: Gemini 자막 기반은 영상 대신 자막을 보내고 대상 �
   assert.ok(ext.store[ext.YTX.sumKey('v5', 'ko', 'gemini', 'gemini-3.8-flash/자막', 'standard')]);
   assert.equal(ext.sent.find((m) => m.type === 'SUMMARY_COMPLETE').data.tldr[0], '요점');
 });
+
+function loadContent(settings) {
+  const store = { settings };
+  const sent = [];
+  const listeners = {};
+  const ctx = vm.createContext({
+    console: { log: () => {}, warn: () => {} },
+    setTimeout, clearTimeout, setInterval, clearInterval, URL, Promise, Date,
+    MutationObserver: class { observe() {} disconnect() {} },
+    location: { pathname: '/watch', href: 'https://www.youtube.com/watch?v=v1' },
+    document: {
+      readyState: 'complete', title: '제목 - YouTube',
+      documentElement: { hasAttribute: () => false },
+      querySelector: () => null, getElementById: () => null, addEventListener: () => {}
+    },
+    chrome: {
+      runtime: {
+        sendMessage: async (msg) => { sent.push(msg); },
+        onMessage: { addListener: (fn) => { listeners.message = fn; } }
+      },
+      storage: {
+        onChanged: { addListener: (fn) => { listeners.changed = fn; } },
+        local: {
+          get: async (k) => (k == null ? { ...store } : (k in store ? { [k]: structuredClone(store[k]) } : {})),
+          set: async (obj) => {
+            const oldValue = store.settings;
+            Object.assign(store, structuredClone(obj));
+            if (obj.settings) listeners.changed({ settings: { oldValue, newValue: store.settings } }, 'local');
+          }
+        }
+      }
+    }
+  });
+  ctx.window = { addEventListener: () => {} };
+  for (const f of ['constants.js', 'content/core.js', 'content/panel.js', 'content/overlay.js', 'content/main.js']) {
+    vm.runInContext(fs.readFileSync(path.join(root, f), 'utf-8'), ctx, { filename: f });
+  }
+  const state = vm.runInContext('state', ctx);
+  const change = (patch) => ctx.chrome.storage.local.set({ settings: { ...store.settings, ...patch } });
+  const receive = (msg) => listeners.message(msg);
+  const translateStarts = () => sent.filter((m) => m.type === 'TRANSLATE_START').length;
+  const run = (code) => vm.runInContext(code, ctx);
+  return { state, store, sent, change, receive, translateStarts, run };
+}
+
+const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+const caption = () => ({
+  video_id: 'v1', source_lang: 'en', format: 'json3',
+  segments: [{ id: 0, start: 0, end: 2, text: 'Hello' }, { id: 1, start: 2, end: 4, text: 'Bye' }]
+});
+
+test('팝업 설정 변경: 수동 모드는 번역을 비우고 대기, 오버레이는 즉시 반영', async () => {
+  const page = loadContent({ route: 'openai', openaiApiKey: 'k', targetLang: 'ko', autoTranslate: false });
+  await tick(10);
+  page.receive({ type: 'SEGMENTS', via: 'proactive', data: caption() });
+  await tick(10);
+  page.run('requestTranslation()');
+  page.receive({ type: 'TRANS_COMPLETE', reqId: page.state.transReqId, videoId: 'v1', translations: { 0: '안녕', 1: '잘가' }, failedChunks: [], routeLabel: 'OpenAI', targetLang: 'ko' });
+  assert.equal(page.state.transPhase, 'done');
+
+  await page.change({ overlayOn: false, overlayFontSize: 'lg' });
+  assert.equal(page.state.overlayOn, false);
+  assert.equal(page.state.overlayFontSize, 'lg');
+  assert.equal(page.state.transPhase, 'done');
+
+  await page.change({ targetLang: 'ja' });
+  assert.deepEqual({ ...page.state.translations }, { 0: '안녕', 1: '잘가' });
+  await tick(900);
+  assert.equal(page.state.targetLang, 'ja');
+  assert.equal(page.state.transPhase, 'ready');
+  assert.deepEqual({ ...page.state.translations }, {});
+  assert.equal(page.translateStarts(), 1);
+
+  await page.change({ geminiModel: 'gemini-4-argon', defMode: 'para' });
+  await tick(900);
+  assert.equal(page.state.transPhase, 'ready');
+  assert.equal(page.translateStarts(), 1);
+
+  await page.change({ enabled: false });
+  page.state.translations = { 0: '오래된 번역' };
+  page.state.transPhase = 'done';
+  await page.change({ targetLang: 'fr' });
+  await tick(900);
+  assert.deepEqual({ ...page.state.translations }, {});
+  assert.equal(page.translateStarts(), 1);
+});
+
+test('팝업 설정 변경: 자동 모드·오류 상태는 연속 입력을 묶어 한 번만 다시 번역한다', async () => {
+  const page = loadContent({ route: 'gemini', geminiApiKey: '', targetLang: 'ko', autoTranslate: true });
+  await tick(10);
+  page.receive({ type: 'SEGMENTS', via: 'proactive', data: caption() });
+  assert.equal(page.translateStarts(), 1);
+  page.receive({ type: 'TRANS_CHUNK_ERROR', reqId: page.state.transReqId, videoId: 'v1', chunkIndex: -1, code: 'NO_API_KEY', message: 'x' });
+  assert.equal(page.state.transPhase, 'error');
+
+  for (const key of ['A', 'AI', 'AIz', 'AIza']) await page.change({ geminiApiKey: key });
+  assert.equal(page.translateStarts(), 1);
+  await tick(900);
+  assert.equal(page.translateStarts(), 2);
+  assert.equal(page.state.transPhase, 'translating');
+  page.receive({ type: 'TRANS_COMPLETE', reqId: page.state.transReqId - 1, videoId: 'v1', translations: { 0: '취소된 작업' }, failedChunks: [], targetLang: 'ko' });
+  assert.equal(page.state.transPhase, 'translating');
+  assert.deepEqual({ ...page.state.translations }, {});
+
+  await page.change({ geminiApiKey: 'AIzaX' });
+  await page.change({ geminiApiKey: 'AIza' });
+  await tick(900);
+  assert.equal(page.translateStarts(), 2);
+});
+
+test('팝업 설정 변경: 수동 대기 중 자동 번역을 켜면 바로 시작, 요약은 이전 요청 응답을 버린다', async () => {
+  const page = loadContent({ route: 'gemini', geminiApiKey: 'k', targetLang: 'ko', autoTranslate: false });
+  await tick(10);
+  page.receive({ type: 'SEGMENTS', via: 'proactive', data: caption() });
+  await tick(10);
+  assert.equal(page.state.transPhase, 'ready');
+
+  page.run('requestSummary()');
+  const firstReq = page.state.summaryReqId;
+  assert.equal(page.state.summaryPhase, 'loading');
+
+  await page.change({ geminiSummarySource: 'transcript', autoTranslate: true });
+  assert.equal(page.translateStarts(), 1);
+  await tick(900);
+  assert.equal(page.state.summaryReqId, firstReq + 1);
+  assert.equal(page.sent.filter((m) => m.type === 'SUMMARIZE_START').length, 2);
+
+  const done = (reqId, text) => page.receive({
+    type: 'SUMMARY_COMPLETE', reqId, videoId: 'v1', level: 'standard', data: { tldr: [text], sections: [] }
+  });
+  done(firstReq, '이전');
+  assert.equal(page.state.summaryByLevel.standard, undefined);
+  done(firstReq + 1, '새');
+  assert.equal(page.state.summaryByLevel.standard.tldr[0], '새');
+});

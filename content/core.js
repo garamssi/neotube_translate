@@ -30,6 +30,7 @@ const state = {
   lastError: null,      // { code, message }
   transSkipped: false,  // 동일 언어로 번역 생략됨
   routeLabel: '',
+  transReqId: 0,
   targetLang: 'ko',
 
   // 요약 (수동 전용 — 번역과 독립)
@@ -39,12 +40,12 @@ const state = {
   summaryError: null,       // { code, message }
   summaryProgress: null,    // { done, total } — 긴 영상 분할 요약 진행
   summaryStartedAt: 0,      // 로딩 경과 시간 표시용
+  summaryReqId: 0,
   summaryClaudeModel: 'auto', // 수준별 자동 매핑이 기본
   route: 'localhost',       // 요약 모델 셀렉트 노출 판단용
 
   // 패널 UI (설계서 §5)
   collapsed: false,
-  collapsedSaved: false, // 저장된 접힘 상태 미러 — 설정 강제 펼침 후 복원 기준
   mode: 'rows',         // 'rows' | 'para' | 'summary'
   bilingual: true,
   follow: true,
@@ -58,12 +59,7 @@ const state = {
 
   // 설정 (M6)
   enabled: true,            // 전체 on/off (액션 팝업 연동)
-  autoTranslate: false,     // 기본 수동 — '번역' 버튼으로 시작
-  settingsOpen: false,
-  cacheOpen: false,         // 캐시 관리 전용 뷰 (설정에서 진입)
-  debugOpen: false,         // 디버그 로그 뷰 (설정에서 진입)
-  settingsDraft: null,      // 설정 화면에서 편집 중인 값
-  settingsSnapshot: null    // 열 때 스냅샷 — 닫을 때 재번역 필요 판단
+  autoTranslate: false      // 기본 수동 — '번역' 버튼으로 시작
 };
 
 const NO_CAPTION_TIMEOUT_MS = 10000;
@@ -127,7 +123,6 @@ async function loadSettings() {
   state.mode = s.defMode;
   state.follow = s.defFollow;
   state.collapsed = s.panelCollapsed;
-  state.collapsedSaved = s.panelCollapsed;
   state.targetLang = s.targetLang;
   state.overlayOn = s.overlayOn;
   state.overlayMode = s.overlayMode;
@@ -152,9 +147,11 @@ function requestSummary(force) {
   state.summaryError = null;
   state.summaryProgress = null;
   state.summaryStartedAt = Date.now();
+  state.summaryReqId++;
   chrome.runtime.sendMessage({
     type: YTX.MSG.SUMMARIZE_START,
     payload: {
+      reqId: state.summaryReqId,
       videoId: state.caption.video_id,
       title: getVideoTitle(),
       sourceLang: state.caption.source_lang,
@@ -169,10 +166,12 @@ function requestSummary(force) {
 function requestTranslation() {
   if (!state.caption) return;
   state.transPhase = 'translating';
+  state.transReqId++;
   state.failedChunks = [];
   state.lastError = null;
   chrome.runtime.sendMessage({
     type: YTX.MSG.TRANSLATE_START,
+    reqId: state.transReqId,
     caption: state.caption,
     title: getVideoTitle() // 캐시 목록 표시용
   }).catch(() => {});

@@ -3,7 +3,7 @@
  *
  * 책임: inject↔background 메시지 라우팅, 재생 시간 동기화(하이라이트·자동
  * 스크롤·seek), 패널 마운트, 테마 추종, SPA 내비게이션 리셋, 극장/전체화면
- * 처리, 액션 팝업 연동, 초기화.
+ * 처리, 팝업 설정 변경 반영, 초기화.
  */
 'use strict';
 
@@ -52,20 +52,17 @@ chrome.runtime.onMessage.addListener((msg) => {
     case YTX.MSG.SUMMARY_PROGRESS: return onSummaryProgress(msg);
     case YTX.MSG.SUMMARY_COMPLETE: return onSummaryComplete(msg);
     case YTX.MSG.SUMMARY_ERROR: return onSummaryError(msg);
-    case YTX.MSG.OPEN_SETTINGS: // 액션 팝업 기어 → 패널 설정 화면 열기
-      if (panelEl && !state.settingsOpen) toggleSettings();
-      return;
   }
 });
 
 function onSummaryProgress(msg) {
-  if (msg.videoId !== state.videoId || msg.level !== state.summaryLevel) return;
+  if (msg.reqId !== state.summaryReqId || msg.videoId !== state.videoId || msg.level !== state.summaryLevel) return;
   state.summaryProgress = { done: msg.done, total: msg.total };
   if (state.mode === 'summary' && state.summaryPhase === 'loading') renderPanelState();
 }
 
 function onSummaryComplete(msg) {
-  if (msg.videoId !== state.videoId) return;
+  if (msg.reqId !== state.summaryReqId || msg.videoId !== state.videoId) return;
   state.summaryByLevel[msg.level] = msg.data;
   if (msg.level === state.summaryLevel) {
     state.summaryPhase = 'done';
@@ -76,7 +73,7 @@ function onSummaryComplete(msg) {
 }
 
 function onSummaryError(msg) {
-  if (msg.videoId !== state.videoId || msg.level !== state.summaryLevel) return;
+  if (msg.reqId !== state.summaryReqId || msg.videoId !== state.videoId || msg.level !== state.summaryLevel) return;
   state.summaryPhase = 'error';
   state.summaryError = { code: msg.code, message: msg.message };
   state.summaryProgress = null;
@@ -110,23 +107,26 @@ function onSegments(msg) {
   restoreCcIfForced(); // CC 자동 켜기로 취득했다면 원래 상태(꺼짐)로 복구
   log(`세그먼트 수신 — ${d.video_id} [${d.source_lang}/${d.format}] via=${msg.via}, ${d.segments.length}개`);
 
-  state.translations = {};
-  state.doneSegments = 0;
-  state.totalSegments = d.segments.length;
-  state.failedChunks = [];
-  state.lastError = null;
-  state.transSkipped = false;
-
-  if (state.autoTranslate) {
-    requestTranslation(); // 자동 모드: 즉시 번역 시작
-  } else {
-    state.transPhase = 'ready'; // 수동 모드: '번역' 버튼 대기
-    applyCachedIfAvailable(d); // 단, 캐시가 있으면 즉시 적용 (비용 0)
-  }
+  beginTranslation(state.autoTranslate);
 
   renderPanelState();
   bindVideo();
   syncOverlay(); // §6.7 — 세그먼트 확보 시점에 오버레이 (재)바인딩
+}
+
+function beginTranslation(start) {
+  state.translations = {};
+  state.doneSegments = 0;
+  state.totalSegments = state.caption.segments.length;
+  state.failedChunks = [];
+  state.lastError = null;
+  state.transSkipped = false;
+  if (start) {
+    requestTranslation();
+  } else {
+    state.transPhase = 'ready';
+    applyCachedIfAvailable(state.caption);
+  }
 }
 
 /**
@@ -183,7 +183,7 @@ async function applyCachedIfAvailable(caption) {
 }
 
 function onTransStatus(msg) {
-  if (msg.videoId !== state.videoId) return;
+  if (msg.reqId !== state.transReqId || msg.videoId !== state.videoId) return;
   state.transPhase = 'translating';
   state.doneSegments = msg.doneSegments;
   state.totalSegments = msg.totalSegments;
@@ -196,7 +196,7 @@ function onTransStatus(msg) {
 }
 
 function onTransProgress(msg) {
-  if (msg.videoId !== state.videoId) return;
+  if (msg.reqId !== state.transReqId || msg.videoId !== state.videoId) return;
   Object.assign(state.translations, msg.translations || {});
   state.doneSegments = msg.doneSegments;
   state.totalSegments = msg.totalSegments;
@@ -207,7 +207,7 @@ function onTransProgress(msg) {
 }
 
 function onTransChunkError(msg) {
-  if (msg.videoId !== state.videoId) return;
+  if (msg.reqId !== state.transReqId || msg.videoId !== state.videoId) return;
   state.failedChunks.push({ index: msg.chunkIndex, code: msg.code, message: msg.message });
   state.lastError = { code: msg.code, message: msg.message };
   if (msg.chunkIndex === -1) state.transPhase = 'error'; // 작업 자체가 시작 불가
@@ -216,7 +216,7 @@ function onTransChunkError(msg) {
 }
 
 function onTransComplete(msg) {
-  if (msg.videoId !== state.videoId) return;
+  if (msg.reqId !== state.transReqId || msg.videoId !== state.videoId) return;
   state.transSkipped = !!msg.skipped; // 동일 언어 → 번역 생략 (원문 그대로)
   Object.assign(state.translations, msg.translations || {});
   state.doneSegments = Object.keys(state.translations).length;
@@ -410,23 +410,83 @@ new MutationObserver(() => {
   if (panelEl) panelEl.dataset.ytxTheme = isDarkTheme() ? 'dark' : 'light';
 }).observe(document.documentElement, { attributes: true, attributeFilter: ['dark'] });
 
-/* ── 액션 팝업 연동: 전체 on/off 반영 (M6) ──────────────────── */
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes[YTX.STORAGE.SETTINGS]) return;
-  const next = { ...YTX.DEFAULT_SETTINGS, ...(changes[YTX.STORAGE.SETTINGS].newValue || {}) };
-  if (next.enabled === state.enabled) return;
+const engineSig = (s) => [s.route, s.targetLang].concat(
+  s.route === 'gemini' ? [s.geminiModel, s.geminiApiKey]
+    : s.route === 'openai' ? [s.openaiModel, s.openaiApiKey]
+      : [s.serverAddress]).join('|');
 
-  state.enabled = next.enabled;
-  if (!state.enabled) {
+const summarySig = (s) => [s.route, s.targetLang].concat(
+  s.route === 'gemini' ? [s.geminiModel, s.geminiSummarySource]
+    : s.route === 'openai' ? [s.openaiModel] : []).join('|');
+
+const ENGINE_APPLY_DELAY_MS = 800;
+let engineApplyTimer = null;
+let engineSettingsBefore = null;
+
+function applyEnabled(enabled) {
+  if (enabled === state.enabled) return;
+  state.enabled = enabled;
+  if (!enabled) {
     panelEl?.remove();
     panelEl = null;
-    syncOverlay(); // 오버레이 제거 + 네이티브 자막 복원
-    log('확장 비활성화됨 (팝업)');
   } else {
     mountPanel();
-    syncOverlay();
-    log('확장 활성화됨 (팝업)');
   }
+  syncOverlay();
+  log(enabled ? '확장 활성화됨 (팝업)' : '확장 비활성화됨 (팝업)');
+}
+
+function applyEngineSettings(prev, next) {
+  const engineChanged = engineSig(prev) !== engineSig(next);
+  const summaryChanged = summarySig(prev) !== summarySig(next);
+  state.route = next.route;
+  state.targetLang = next.targetLang;
+  renderPanelState();
+  if (!engineChanged && !summaryChanged) return;
+
+  if (summaryChanged || state.summaryPhase === 'error') {
+    const wasLoading = state.summaryPhase === 'loading';
+    state.summaryByLevel = {};
+    state.summaryError = null;
+    state.summaryProgress = null;
+    state.summaryPhase = 'idle';
+    if (summaryChanged && wasLoading) requestSummary();
+  }
+
+  if (engineChanged && state.caption) {
+    const start = state.autoTranslate || state.transPhase === 'translating' || state.transPhase === 'error';
+    beginTranslation(state.enabled && start);
+    refreshOverlayText();
+  }
+  renderPanelState();
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[YTX.STORAGE.SETTINGS]) return;
+  const change = changes[YTX.STORAGE.SETTINGS];
+  const next = YTX.normalizeSettings(change.newValue);
+
+  applyEnabled(next.enabled);
+
+  const autoTurnedOn = next.autoTranslate && !state.autoTranslate;
+  state.autoTranslate = next.autoTranslate;
+  if (['overlayOn', 'overlayMode', 'overlayFontSize'].some((k) => next[k] !== state[k])) {
+    state.overlayOn = next.overlayOn;
+    state.overlayMode = next.overlayMode;
+    state.overlayFontSize = next.overlayFontSize;
+    syncOverlay();
+    refreshOverlayText();
+  }
+  if (autoTurnedOn && state.enabled && state.caption && state.transPhase === 'ready') requestTranslation();
+  renderPanelState();
+
+  if (!engineSettingsBefore) engineSettingsBefore = YTX.normalizeSettings(change.oldValue);
+  clearTimeout(engineApplyTimer);
+  engineApplyTimer = setTimeout(() => {
+    const prev = engineSettingsBefore;
+    engineSettingsBefore = null;
+    applyEngineSettings(prev, next);
+  }, ENGINE_APPLY_DELAY_MS);
 });
 
 /* ── M7: SPA 내비게이션 정밀 리셋 ───────────────────────────── */
@@ -458,10 +518,6 @@ window.addEventListener('yt-navigate-finish', () => {
     state.lastError = null;
     state.activeSegId = -1;
     state.followSuspended = false;
-    state.settingsOpen = false;
-    state.cacheOpen = false;
-    state.debugOpen = false;
-    state.collapsed = state.collapsedSaved; // 설정 열림 중 영상 전환 대비 — 마지막 쉐브론 선택 복원
     state.summaryPhase = 'idle';
     state.summaryByLevel = {};
     state.summaryError = null;

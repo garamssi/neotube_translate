@@ -12,7 +12,17 @@
 importScripts('constants.js', 'bg/debuglog.js', 'bg/parsers.js', 'bg/capture.js', 'bg/translation.js', 'bg/summary.js');
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !sender.tab) return;
+  if (!msg) return;
+  if (msg.type === YTX.MSG.DEBUG_GET) {
+    DBG.snapshot().then((data) => sendResponse({ ok: true, data }));
+    return true;
+  }
+  if (msg.type === YTX.MSG.DEBUG_CLEAR) {
+    DBG.clear();
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (!sender.tab) return;
   const tabId = sender.tab.id;
 
   switch (msg.type) {
@@ -26,7 +36,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
 
     case YTX.MSG.TRANSLATE_START: // caption 동봉 — SW 재시작에도 안전
-      runTranslationJob(tabId, msg.caption, msg.title || '')
+      runTranslationJob(tabId, msg.caption, msg.title || '', msg.reqId)
         .catch((e) => warn('번역 작업 예외:', e));
       break;
 
@@ -38,14 +48,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case YTX.MSG.TAB_RESET: // SPA 내비게이션(M7) — 취득 상태·번역 작업 리셋
       resetTabCapture(tabId);
       cancelTabJobs(tabId);
-      break;
-
-    case YTX.MSG.DEBUG_GET: // 패널 디버그 뷰 — 로그/통계 스냅샷
-      DBG.snapshot().then((data) => sendResponse({ ok: true, data }));
-      return true; // 비동기 sendResponse
-
-    case YTX.MSG.DEBUG_CLEAR:
-      DBG.clear();
       break;
 
     default:

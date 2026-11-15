@@ -230,10 +230,6 @@
 .ytx-outline-sm { border-radius: 14px; padding: 5px 12px; font-size: 12px; }
 
 /* ── 인라인 설정 (M6, 목업 설정 화면 사양) ─────────────────── */
-.ytx-panel.ytx-settings-open .ytx-toolbar,
-.ytx-panel.ytx-settings-open .ytx-footer,
-.ytx-panel.ytx-settings-open .ytx-resume-btn { display: none; }
-
 .ytx-settings {
   padding: 16px 16px 14px 16px;
   display: flex; flex-direction: column; gap: 22px;
@@ -278,9 +274,6 @@
 .ytx-toggle.ytx-on { background: var(--ytx-accent); justify-content: flex-end; }
 .ytx-toggle-knob { width: 18px; height: 18px; border-radius: 50%; background: #ffffff; }
 
-.ytx-settings-footer { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.ytx-settings-footer .ytx-field-hint { flex: 1; }
-.ytx-settings-footer .ytx-ghost-btn { margin-left: auto; }
 .ytx-primary-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* ── ? 도움말 툴팁 (hover 또는 클릭 토글) ────────────────────── */
