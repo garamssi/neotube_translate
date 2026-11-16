@@ -66,7 +66,7 @@ test('설정 정규화: 목록에 없는 모델은 기본값으로', () => {
   assert.equal(YTX.normalizeSettings({ openaiModel: 'gpt-6.1-sol' }).openaiModel, 'gpt-6.1-sol');
 });
 
-test('작업: 중복 원문 1회 전송 · 누락 줄만 재시도 · 캐시 저장', async () => {
+test('작업: 중복 원문 1회 전송, 누락 줄만 재시도, 캐시 저장', async () => {
   const requests = [];
   const ext = loadExtension({
     settings: { route: 'openai', openaiApiKey: 'k', targetLang: 'ko' },
@@ -274,7 +274,7 @@ test('팝업 설정 변경: 수동 모드는 번역을 비우고 대기, 오버�
   assert.equal(page.translateStarts(), 1);
 });
 
-test('팝업 설정 변경: 자동 모드·오류 상태는 연속 입력을 묶어 한 번만 다시 번역한다', async () => {
+test('팝업 설정 변경: 자동 모드/오류 상태는 연속 입력을 묶어 한 번만 다시 번역한다', async () => {
   const page = loadContent({ route: 'gemini', geminiApiKey: '', targetLang: 'ko', autoTranslate: true });
   await tick(10);
   page.receive({ type: 'SEGMENTS', via: 'proactive', data: caption() });

@@ -366,7 +366,7 @@ async function runSummaryJobInner(tabId, payload) {
   } else {
     exec = summaryExecConfig(settings, level);
     model = exec.model;
-    routeLabel = `Claude CLI(${model}) · ${settings.serverAddress}`;
+    routeLabel = `Claude CLI(${model}) / ${settings.serverAddress}`;
   }
   const key = YTX.sumKey(videoId, targetLang, route, model, level);
 
@@ -453,7 +453,7 @@ async function runSummaryJobInner(tabId, payload) {
   pruneCache();
 
   sendToTab(tabId, { reqId: payload.reqId, type: YTX.MSG.SUMMARY_COMPLETE, videoId, level, data, routeLabel, fromCache: false });
-  log(`요약 완료 — ${routeLabel} · ${fromTranscript ? '자막 기반' : '영상 분석'} · 소요 ${((Date.now() - startedAt) / 1000).toFixed(1)}초 · ` +
+  log(`요약 완료 — ${routeLabel}, ${fromTranscript ? '자막 기반' : '영상 분석'}, 소요 ${((Date.now() - startedAt) / 1000).toFixed(1)}초, ` +
     `TL;DR ${data.tldr.length}줄, 섹션 ${data.sections.length}개`);
 }
 

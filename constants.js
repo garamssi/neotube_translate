@@ -59,11 +59,11 @@ const YTX = {
   GEMINI: {
     API_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
     MODELS: [
-      { value: 'gemini-3.8-flash', label: 'gemini-3.8-flash (권장·무료 티어)', thinking: 'low' },
-      { value: 'gemini-3.5-flash-lite', label: 'gemini-3.5-flash-lite (최저가·무료 티어)', thinking: 'minimal' },
-      { value: 'gemini-4-hydrogen', label: 'gemini-4-hydrogen (균형·무료 티어)', thinking: 'low' },
-      { value: 'gemini-4-argon', label: 'gemini-4-argon (고품질·유료 전용)', thinking: 'low' },
-      { value: 'gemini-4-carbon', label: 'gemini-4-carbon (최고 품질·유료 전용)', thinking: 'low' }
+      { value: 'gemini-3.8-flash', label: 'gemini-3.8-flash (권장, 무료 티어)', thinking: 'low' },
+      { value: 'gemini-3.5-flash-lite', label: 'gemini-3.5-flash-lite (최저가, 무료 티어)', thinking: 'minimal' },
+      { value: 'gemini-4-hydrogen', label: 'gemini-4-hydrogen (균형, 무료 티어)', thinking: 'low' },
+      { value: 'gemini-4-argon', label: 'gemini-4-argon (고품질, 유료 전용)', thinking: 'low' },
+      { value: 'gemini-4-carbon', label: 'gemini-4-carbon (최고 품질, 유료 전용)', thinking: 'low' }
     ],
     DEFAULT_MODEL: 'gemini-3.8-flash',
     PACING: { free: 6500, paid: 400 }
@@ -72,7 +72,7 @@ const YTX = {
   OPENAI: {
     API_URL: 'https://api.openai.com/v1/chat/completions',
     MODELS: [
-      { value: 'gpt-6-luna', label: 'gpt-6-luna (권장·저가·고속)', effort: 'none' },
+      { value: 'gpt-6-luna', label: 'gpt-6-luna (권장, 저가, 고속)', effort: 'none' },
       { value: 'gpt-6.1-terra', label: 'gpt-6.1-terra (균형)', effort: 'none' },
       { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol (품질 우선)', effort: 'low' },
       { value: 'gpt-6-astra', label: 'gpt-6-astra (최고 품질)', effort: 'low' }

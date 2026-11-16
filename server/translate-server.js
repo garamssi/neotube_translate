@@ -270,7 +270,7 @@ async function handleSummarize(req, res, body, signal) {
 
   const start = Date.now();
   log(`요약 요청: instruction ${instruction.length}자 + content ${content.length}자` +
-    `${safeModel ? ` · model=${safeModel}` : ''}${safeEffort ? ` · effort=${safeEffort}` : ''}`);
+    `${safeModel ? `, model=${safeModel}` : ''}${safeEffort ? `, effort=${safeEffort}` : ''}`);
 
   let obj;
   try {

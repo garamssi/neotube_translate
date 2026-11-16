@@ -380,7 +380,7 @@ function buildManualCtaHtml() {
   return `
     <div class="ytx-progress">
       <div class="ytx-progress-row">
-        <div class="ytx-progress-label">자막 준비됨 · ${state.caption.segments.length}개 세그먼트</div>
+        <div class="ytx-progress-label">자막 준비됨, ${state.caption.segments.length}개 세그먼트</div>
         <div class="ytx-header-spacer"></div>
         <button class="ytx-primary-btn ytx-cta-btn" data-ytx="start-translate">이 영상 번역하기</button>
       </div>
@@ -425,7 +425,7 @@ function buildProgressHeaderHtml() {
     <div class="ytx-progress" data-ytx="progress">
       <div class="ytx-progress-row">
         <div class="ytx-spinner"></div>
-        <div class="ytx-progress-label" data-ytx="progress-label">번역 중 · ${state.doneSegments} / ${state.totalSegments} 세그먼트</div>
+        <div class="ytx-progress-label" data-ytx="progress-label">번역 중, ${state.doneSegments} / ${state.totalSegments} 세그먼트</div>
         <div class="ytx-progress-route">${escapeHtml(state.routeLabel || '')}</div>
       </div>
       <div class="ytx-progress-track"><div class="ytx-progress-fill" data-ytx="progress-fill" style="width:${pct}%"></div></div>
@@ -439,7 +439,7 @@ function updateProgressHeader() {
   const fill = panelEl.querySelector('[data-ytx="progress-fill"]');
   if (!label || !fill) return;
   const pct = state.totalSegments ? Math.round(state.doneSegments / state.totalSegments * 100) : 0;
-  label.textContent = `번역 중 · ${state.doneSegments} / ${state.totalSegments} 세그먼트`;
+  label.textContent = `번역 중, ${state.doneSegments} / ${state.totalSegments} 세그먼트`;
   fill.style.width = `${pct}%`;
 }
 
@@ -498,37 +498,37 @@ function renderFooter() {
     case 'ready': {
       const done = Object.keys(state.translations).length;
       statusText.textContent = done > 0
-        ? `부분 캐시 적용 · ${done}/${state.caption.segments.length} · 나머지는 번역 버튼으로`
-        : `번역 대기 (수동 모드) · ${state.caption.segments.length}개 세그먼트`;
+        ? `부분 캐시 적용, ${done}/${state.caption.segments.length}, 나머지는 번역 버튼으로`
+        : `번역 대기 (수동 모드), ${state.caption.segments.length}개 세그먼트`;
       statusDot.className = done > 0 ? 'ytx-status-dot ytx-accent' : 'ytx-status-dot';
       break;
     }
     case 'translating':
-      statusText.textContent = `번역 중 · ${state.doneSegments}/${state.totalSegments} · ${state.routeLabel}`;
+      statusText.textContent = `번역 중, ${state.doneSegments}/${state.totalSegments}, ${state.routeLabel}`;
       statusDot.className = 'ytx-status-dot ytx-accent';
       break;
     case 'done': {
       if (state.transSkipped) {
         statusText.textContent =
-          `원문이 이미 ${tgt} · 번역 생략 · ${state.caption.segments.length}개 세그먼트`;
+          `원문이 이미 ${tgt}, 번역 생략, ${state.caption.segments.length}개 세그먼트`;
         statusDot.className = 'ytx-status-dot ytx-accent';
         break;
       }
-      const fail = state.failedChunks.length ? ` · 실패 청크 ${state.failedChunks.length}개` : '';
+      const fail = state.failedChunks.length ? `, 실패 청크 ${state.failedChunks.length}개` : '';
       statusText.textContent =
-        `번역 완료 · ${state.caption.segments.length}개 세그먼트 · ${state.routeLabel} · ${src} → ${tgt}${fail}`;
+        `번역 완료, ${state.caption.segments.length}개 세그먼트, ${state.routeLabel}, ${src} → ${tgt}${fail}`;
       statusDot.className = state.failedChunks.length
         ? 'ytx-status-dot ytx-danger' : 'ytx-status-dot ytx-accent';
       break;
     }
     case 'error':
-      statusText.textContent = `오류 · ${state.lastError?.code || ''} · ${state.routeLabel || ''}`;
+      statusText.textContent = `오류, ${state.lastError?.code || ''}, ${state.routeLabel || ''}`;
       statusDot.className = 'ytx-status-dot ytx-danger';
       break;
     default: {
       const viaLabel = { intercept: '인터셉트(B)', refetch: '재fetch(A)', proactive: '능동 취득' }[state.captionVia] || state.captionVia;
       statusText.textContent =
-        `자막 취득 완료 · ${state.caption.segments.length}개 · ${viaLabel}`;
+        `자막 취득 완료, ${state.caption.segments.length}개, ${viaLabel}`;
       statusDot.className = 'ytx-status-dot ytx-accent';
     }
   }

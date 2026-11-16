@@ -185,7 +185,7 @@ const ROUTES = {
     label: (settings) => `Gemini(${settings.geminiModel})`,
     parallel: () => YTX.CHUNK_GEMINI.PARALLEL,
     precheck: (settings) => !settings.geminiApiKey
-      ? { code: 'NO_API_KEY', message: 'Gemini API 키가 설정되지 않았습니다. 툴바의 확장 아이콘을 눌러 설정에서 키를 입력하세요.' }
+      ? { code: 'NO_API_KEY', message: 'Gemini API 키가 설정되지 않았습니다. 툴바의 확장 아이콘을 누르고 설정(⚙)에서 키를 입력하세요.' }
       : null,
     buildChunks: (segments) => buildChunksByTokenBudget(segments, YTX.CHUNK_GEMINI, 'Gemini'),
     translateChunk: callGemini
@@ -194,13 +194,13 @@ const ROUTES = {
     label: (settings) => `OpenAI(${settings.openaiModel})`,
     parallel: () => YTX.CHUNK_OPENAI.PARALLEL,
     precheck: (settings) => !settings.openaiApiKey
-      ? { code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다. 툴바의 확장 아이콘을 눌러 설정에서 키를 입력하세요.' }
+      ? { code: 'NO_API_KEY', message: 'OpenAI API 키가 설정되지 않았습니다. 툴바의 확장 아이콘을 누르고 설정(⚙)에서 키를 입력하세요.' }
       : null,
     buildChunks: (segments) => buildChunksByTokenBudget(segments, YTX.CHUNK_OPENAI, 'OpenAI'),
     translateChunk: callOpenAI
   },
   localhost: {
-    label: (settings) => `Claude CLI · ${settings.serverAddress}`,
+    label: (settings) => `Claude CLI / ${settings.serverAddress}`,
     parallel: () => YTX.CHUNK_LOCALHOST.PARALLEL,
     precheck: () => null,
     buildChunks: (segments) => buildChunks(segments, YTX.CHUNK_LOCALHOST),
@@ -709,7 +709,7 @@ async function openaiGenerate(settings, opts) {
       if (status === 429) {
         if (/insufficient_quota|quota/i.test(errCode) || /quota/i.test(detail)) {
           throw transError('QUOTA',
-            'OpenAI API 크레딧/사용 한도가 소진되었습니다 — platform.openai.com에서 결제·사용량을 확인하세요.');
+            'OpenAI API 크레딧/사용 한도가 소진되었습니다 — platform.openai.com에서 결제/사용량을 확인하세요.');
         }
         const ra = parseInt(res.headers.get('Retry-After') || '0', 10);
         throw transError('RATE_LIMITED', detail || '요청 한도 초과 (RPM/TPM)', { retryAfterMs: ra > 0 ? ra * 1000 : 0 });

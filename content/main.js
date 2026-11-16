@@ -175,7 +175,7 @@ async function applyCachedIfAvailable(caption) {
       state.transPhase = 'done'; // 완전 캐시 → 번역 버튼 불필요
       log(`수동 모드 — 캐시 적용(완전, ${state.doneSegments}개)`);
     } else {
-      log(`수동 모드 — 캐시 적용(부분, ${state.doneSegments}개) · 나머지는 번역 버튼으로`);
+      log(`수동 모드 — 캐시 적용(부분, ${state.doneSegments}개), 나머지는 번역 버튼으로`);
     }
     renderPanelState();
     refreshOverlayText();

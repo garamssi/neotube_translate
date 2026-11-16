@@ -2,11 +2,10 @@
 
 const app = document.getElementById('app');
 const body = document.getElementById('body');
-const enabledBtn = document.getElementById('enabled');
-const enabledLabel = document.getElementById('enabled-label');
+const gearBtn = document.getElementById('gear');
 
 let settings = { ...YTX.DEFAULT_SETTINGS };
-let view = 'settings';
+let view = 'home';
 let ownWrites = 0;
 let debugTimer = null;
 let cacheQuery = '';
@@ -32,18 +31,50 @@ async function save(patch) {
   }
 }
 
-function renderEnabled() {
-  enabledBtn.classList.toggle('ytx-on', settings.enabled);
-  enabledBtn.setAttribute('aria-checked', String(!!settings.enabled));
-  enabledLabel.textContent = settings.enabled ? '사용 중' : '꺼짐';
+function renderHome() {
+  const d = settings;
+  const route = d.route === 'gemini' ? ['Gemini API', d.geminiModel]
+    : d.route === 'openai' ? ['OpenAI API', d.openaiModel]
+      : ['Claude CLI', d.serverAddress];
+  const lang = (YTX.TARGET_LANGS.find(([v]) => v === d.targetLang) || [])[1] || d.targetLang;
+  const row = (label, value) => `
+        <div class="ytx-field-row">
+          <div class="ytx-field-row-label" style="color: var(--ytx-text2);">${label}</div>
+          <div class="pop-value">${value}</div>
+        </div>`;
+
+  body.innerHTML = `
+    <div class="ytx-settings">
+      <div class="ytx-field">
+        <div class="ytx-field-row">
+          <div class="ytx-field-row-label"><b>확장 프로그램 사용</b><div class="ytx-field-row-sub">${d.enabled ? '켜짐, 자막 취득 활성' : '꺼짐, 자막 취득 안 함'}</div></div>
+          <button class="ytx-toggle${d.enabled ? ' ytx-on' : ''}" data-ytx="enabled" role="switch" aria-checked="${!!d.enabled}" aria-label="확장 프로그램 사용"><div class="ytx-toggle-knob"></div></button>
+        </div>
+      </div>
+      <div class="ytx-field ytx-field-divide">
+        <div class="ytx-field-label">현재 설정</div>
+        ${row('번역 경로', `${route[0]}<span class="pop-badge">${escapeHtml(route[1])}</span>`)}
+        ${row('대상 언어', escapeHtml(lang))}
+        ${row('번역 시작', d.autoTranslate ? '자동' : '수동 (번역 버튼)')}
+      </div>
+    </div>`;
+
+  $('enabled').addEventListener('click', async () => {
+    await save({ enabled: !settings.enabled });
+    renderHome();
+    $('enabled').focus();
+  });
 }
 
 function render() {
   if (debugTimer) { clearInterval(debugTimer); debugTimer = null; }
-  renderEnabled();
+  app.classList.toggle('pop-home', view === 'home');
+  gearBtn.classList.toggle('ytx-on', view !== 'home');
+  gearBtn.setAttribute('aria-pressed', String(view !== 'home'));
   if (view === 'cache') renderCacheView();
   else if (view === 'debug') renderDebugView();
-  else renderSettings();
+  else if (view === 'settings') renderSettings();
+  else renderHome();
 }
 
 function show(next) {
@@ -152,7 +183,7 @@ function renderSettings() {
       </div>
 
       <div class="ytx-field">
-        <div class="ytx-field-label">번역·요약 캐시 <span class="ytx-label-note">(재방문 시 즉시 표시용)</span></div>
+        <div class="ytx-field-label">번역/요약 캐시 <span class="ytx-label-note">(재방문 시 즉시 표시용)</span></div>
         <div class="ytx-field-row">
           <div class="ytx-field-row-label" style="color: var(--ytx-text2);" data-ytx="cache-summary">불러오는 중…</div>
           <button class="ytx-outline-btn" data-ytx="cache-open">캐시 관리</button>
@@ -162,7 +193,7 @@ function renderSettings() {
       <div class="ytx-field ytx-field-divide">
         <div class="ytx-field-label">문제 해결</div>
         <div class="ytx-field-row">
-          <div class="ytx-field-row-label">요청·오류 이벤트 기록<div class="ytx-field-row-sub">이 브라우저에만 저장</div></div>
+          <div class="ytx-field-row-label">요청/오류 이벤트 기록<div class="ytx-field-row-sub">이 브라우저에만 저장</div></div>
           <button class="ytx-outline-btn" data-ytx="debug-open">디버그 로그</button>
         </div>
       </div>
@@ -226,7 +257,7 @@ async function fillCacheSummary() {
   if (!el) return;
   const bytes = entries.reduce((sum, e) => sum + e.size, 0);
   el.textContent = entries.length
-    ? `${entries.length}개 저장됨 · ${fmtBytes(bytes)}`
+    ? `${entries.length}개 저장됨, ${fmtBytes(bytes)}`
     : '저장된 캐시 없음';
 }
 
@@ -319,7 +350,7 @@ function renderCacheView() {
     });
 
     const totalBytes = entries.reduce((sum, e) => sum + e.size, 0);
-    $('cache-stats').textContent = `${filtered.length}/${entries.length}개 · ${fmtBytes(totalBytes)}`;
+    $('cache-stats').textContent = `${filtered.length}/${entries.length}개, ${fmtBytes(totalBytes)}`;
 
     if (filtered.length === 0) {
       itemsEl.innerHTML = '<div class="ytx-empty"><div class="ytx-empty-desc">' +
@@ -329,15 +360,15 @@ function renderCacheView() {
 
     itemsEl.innerHTML = filtered.map((e) => {
       const kind = e.isSum
-        ? `요약(${escapeHtml(levelLabel(e.level))}${e.model && e.model !== e.level ? '·' + escapeHtml(e.model) : ''})`
-        : `번역 ${e.count}개${e.complete ? '' : ' · 부분'}`;
+        ? `요약(${escapeHtml(levelLabel(e.level))}${e.model && e.model !== e.level ? '/' + escapeHtml(e.model) : ''})`
+        : `번역 ${e.count}개${e.complete ? '' : ', 부분'}`;
       const routeName = e.route === 'gemini' ? 'Gemini' : e.route === 'openai' ? 'OpenAI' : 'Claude';
-      const engine = routeName + (!e.isSum && e.model && e.model !== 'cli' ? `·${escapeHtml(e.model)}` : '');
+      const engine = routeName + (!e.isSum && e.model && e.model !== 'cli' ? `/${escapeHtml(e.model)}` : '');
       return `
       <div class="ytx-cache-item">
         <div class="ytx-cache-info">
           <div class="ytx-cache-title" title="${escapeHtml(e.title)}">${escapeHtml(e.title)}</div>
-          <div class="ytx-cache-meta">${kind} · → ${escapeHtml((e.lang || '?').toUpperCase())} · ${engine} · ${fmtBytes(e.size)} · ${fmtCacheDate(e.cachedAt)}</div>
+          <div class="ytx-cache-meta">${kind}, → ${escapeHtml((e.lang || '?').toUpperCase())}, ${engine}, ${fmtBytes(e.size)}, ${fmtCacheDate(e.cachedAt)}</div>
         </div>
         <button class="ytx-icon-btn ytx-cache-del" data-key="${escapeHtml(e.key)}" title="이 캐시 삭제" aria-label="이 캐시 삭제">✕</button>
       </div>`;
@@ -377,7 +408,7 @@ function fmtDebugTime(ms) {
 }
 
 function debugStatsText(s) {
-  return `요청 ${s.attempts || 0} · 성공 ${s.ok || 0} · 실패 ${s.failed || 0} · 재시도 ${s.retries || 0} · 429 ${s.rateLimited || 0}`;
+  return `요청 ${s.attempts || 0}, 성공 ${s.ok || 0}, 실패 ${s.failed || 0}, 재시도 ${s.retries || 0}, 429 ${s.rateLimited || 0}`;
 }
 
 function debugLogAsText(data) {
@@ -484,8 +515,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     return;
   }
   settings = YTX.normalizeSettings(changes[YTX.STORAGE.SETTINGS].newValue);
-  renderEnabled();
-  if (view === 'settings' && !body.contains(document.activeElement)) renderSettings();
+  if (view === 'home') renderHome();
+  else if (view === 'settings' && !body.contains(document.activeElement)) renderSettings();
 });
 
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
@@ -495,9 +526,6 @@ applyTheme();
 
 chrome.storage.local.get(YTX.STORAGE.SETTINGS).then((stored) => {
   settings = YTX.normalizeSettings(stored[YTX.STORAGE.SETTINGS]);
-  enabledBtn.addEventListener('click', async () => {
-    await save({ enabled: !settings.enabled });
-    renderEnabled();
-  });
+  gearBtn.addEventListener('click', () => show(view === 'home' ? 'settings' : 'home'));
   render();
 });

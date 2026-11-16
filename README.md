@@ -60,7 +60,7 @@ Service Worker ─ 정규화 → 청크 분할 → 병렬 번역 → 완료분�
 서버는 의존성이 없어서 `npm install`이 필요 없습니다. 창에 "자가 테스트 통과"가 뜨면 준비 완료입니다.
 환경변수, LAN 공유, "Not logged in" 해결 방법 등은 [server/README.md](server/README.md)에 정리되어 있습니다.
 
-**Gemini API.** [Google AI Studio](https://aistudio.google.com/apikey)에서 키를 발급받아 툴바의 확장 아이콘을 눌러 여는 설정 팝업에서 번역 경로를 Gemini로 바꾸고 키를 입력합니다. 무료 키라면 티어를 "무료"로 두세요 — 분당 호출 제한에 맞춰 요청 간격을 자동으로 조절합니다.
+**Gemini API.** [Google AI Studio](https://aistudio.google.com/apikey)에서 키를 발급받아 툴바의 확장 아이콘을 누르고 팝업의 설정(⚙)에서 번역 경로를 Gemini로 바꾸고 키를 입력합니다. 무료 키라면 티어를 "무료"로 두세요 — 분당 호출 제한에 맞춰 요청 간격을 자동으로 조절합니다.
 
 **OpenAI API.** [platform.openai.com](https://platform.openai.com/api-keys)에서 키를 발급받아 번역 경로를 OpenAI로 바꾸고 키를 입력합니다. OpenAI API는 무료 티어가 없어 결제 등록된 키가 필요합니다. 기본 모델은 gpt-6-luna이며 설정에서 바꿀 수 있습니다. 요약은 Claude 경로와 같은 자막 기반 방식으로 동작합니다 (OpenAI는 영상 URL 분석을 지원하지 않음).
 
@@ -68,7 +68,7 @@ Service Worker ─ 정규화 → 청크 분할 → 병렬 번역 → 완료분�
 
 자막(CC)이 있는 영상을 열면 우측에 패널이 나타납니다. **번역** 버튼을 누르면 시작되고, 완료된 부분부터 바로 표시됩니다. 요약은 요약 탭에서 수준을 고르고 실행하면 됩니다 — Gemini 경로에서는 자막 대신 영상 URL만 보내 Gemini가 영상을 직접 분석하고, 실패하면 자막 기반 방식으로 자동 폴백합니다.
 
-주요 설정(툴바 확장 아이콘 팝업):
+주요 설정(툴바 확장 아이콘 팝업 → ⚙):
 
 | 설정 | 기본값 | 비고 |
 |---|---|---|
